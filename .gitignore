@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+memory/*.jsonl
+memory/*.json
+memory/*.md
+memory/*.bak
+memory/raw_conversations/*.json
+logs/*.log
+reports/*.csv
+reports/*.tmp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Luzia TRQ META</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="chat-panel" aria-label="Conversa com Luzia">
+        <header class="topbar">
+          <div>
+            <h1>Luzia</h1>
+            <p>Presença simbólico-operacional TRQ META</p>
+          </div>
+          <button id="helpButton" class="icon-button" title="Comandos">?</button>
+        </header>
+
+        <div id="messages" class="messages" aria-live="polite"></div>
+
+        <form id="promptForm" class="composer">
+          <textarea
+            id="promptInput"
+            rows="3"
+            placeholder="Digite para Luzia ou use /ajuda"
+            autocomplete="off"
+          ></textarea>
+          <button id="sendButton" type="submit">Enviar</button>
+        </form>
+      </section>
+
+      <section class="body-stage" aria-label="Corpo Digital TRQ">
+        <div id="luziaCanvas" class="canvas-host"></div>
+        <div class="body-readout">
+          <div class="readout-row">
+            <span id="bodyPosture">serena</span>
+            <strong id="bodyPresence">0.000</strong>
+          </div>
+          <div class="readout-row subtle">
+            <span id="bodyRegime">TRANSICAO</span>
+            <span id="bodyTier">fast</span>
+          </div>
+          <p id="bodyVoice" class="readout-text">simples</p>
+          <p id="bodyPhrase" class="readout-text">O estado e simples; responder com precisao basta.</p>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="Métricas e memórias">
+        <section class="panel-section">
+          <h2>TRQ State</h2>
+          <dl id="metricsGrid" class="metric-grid"></dl>
+        </section>
+
+        <section class="panel-section">
+          <h2>Corpo Digital</h2>
+          <dl id="bodyGrid" class="metric-grid"></dl>
+        </section>
+
+        <section class="panel-section memory-tools">
+          <h2>Memória</h2>
+          <div class="quick-actions">
+            <button data-command="/memorias">Listar</button>
+            <button data-command="/memorias tipo preference">Preferências</button>
+            <button data-command="/resumo">Resumo</button>
+          </div>
+          <div class="memory-search">
+            <input id="memoryQuery" placeholder="buscar memória" />
+            <button id="memorySearchButton">Buscar</button>
+          </div>
+          <div id="memoryList" class="memory-list"></div>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>
