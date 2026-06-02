@@ -13,5 +13,6 @@ logs/*.log
 reports/*.csv
 reports/*.tmp
 web_check_*.png
+.tmp_*.log
 .DS_Store
 Thumbs.db

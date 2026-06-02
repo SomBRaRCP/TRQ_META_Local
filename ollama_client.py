@@ -8,6 +8,8 @@ estimadores e roteamento sem depender de rede, GPU ou servidor Ollama ativo.
 
 import logging
 import math
+import json
+from collections.abc import Iterator
 from typing import Any
 
 import requests
@@ -40,6 +42,10 @@ logging.basicConfig(
 
 # Logger especifico deste modulo.
 logger = logging.getLogger(__name__)
+
+
+class OllamaStreamError(RuntimeError):
+    """Erro tratavel durante geracao em streaming."""
 
 
 def _boosted_num_gpu(raw_num_gpu: str) -> int:
@@ -143,3 +149,69 @@ def generate_with_ollama(
         message = "Erro: o Ollama retornou uma resposta JSON invalida."
         logger.exception(message)
         return message
+
+
+def stream_with_ollama(
+    prompt: str,
+    model: str = DEFAULT_MODEL,
+    system_prompt: str | None = None,
+    temperature: float = DEFAULT_TEMPERATURE,
+    num_ctx: int = DEFAULT_NUM_CTX,
+) -> Iterator[str]:
+    """Chama o Ollama em streaming e rende os fragmentos de texto.
+
+    Diferente de generate_with_ollama, esta funcao deixa excecoes trataveis
+    chegarem ao servidor web para que a interface mantenha a resposta parcial
+    congelada quando ocorrer timeout ou queda de conexao.
+    """
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "stream": True,
+        "options": _runtime_options(temperature=temperature, num_ctx=num_ctx),
+    }
+    if system_prompt:
+        payload["system"] = system_prompt
+
+    try:
+        with requests.post(
+            OLLAMA_ENDPOINT,
+            json=payload,
+            stream=True,
+            timeout=OLLAMA_TIMEOUT_SECONDS,
+        ) as response:
+            response.raise_for_status()
+
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                try:
+                    data = json.loads(raw_line)
+                except ValueError:
+                    logger.warning("Linha invalida no streaming do Ollama: %r", raw_line)
+                    continue
+
+                chunk = data.get("response")
+                if chunk:
+                    yield str(chunk)
+                if data.get("done"):
+                    break
+
+    except requests.exceptions.ConnectionError as exc:
+        message = (
+            "Erro: nao consegui conectar ao Ollama em "
+            f"{OLLAMA_ENDPOINT}. Verifique se `ollama serve` esta rodando."
+        )
+        logger.exception(message)
+        raise OllamaStreamError(message) from exc
+
+    except requests.exceptions.Timeout as exc:
+        message = "Erro: a chamada ao Ollama excedeu o tempo limite."
+        logger.exception(message)
+        raise OllamaStreamError(message) from exc
+
+    except requests.exceptions.RequestException as exc:
+        message = f"Erro ao chamar o Ollama: {exc}"
+        logger.exception(message)
+        raise OllamaStreamError(message) from exc

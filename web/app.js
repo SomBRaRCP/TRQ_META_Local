@@ -94,6 +94,13 @@ function addMessage(role, text, className = "") {
   node.append(meta, body);
   messages.appendChild(node);
   messages.scrollTop = messages.scrollHeight;
+  return { node, body };
+}
+
+function appendMessageText(message, text) {
+  if (!message || !text) return;
+  message.body.textContent += text;
+  messages.scrollTop = messages.scrollHeight;
 }
 
 function setGrid(target, data, keys) {
@@ -276,21 +283,124 @@ function applyResult(data) {
   if (data.memories) updateMemoryList(data.memories);
 }
 
+function parseStreamBlock(block) {
+  const lines = block.split("\n");
+  let event = "message";
+  const dataLines = [];
+
+  lines.forEach((line) => {
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trimStart());
+    }
+  });
+
+  if (!dataLines.length) return null;
+  return {
+    event,
+    data: JSON.parse(dataLines.join("\n")),
+  };
+}
+
+async function readEventStream(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    let separatorIndex = buffer.indexOf("\n\n");
+    while (separatorIndex !== -1) {
+      const block = buffer.slice(0, separatorIndex);
+      buffer = buffer.slice(separatorIndex + 2);
+      const parsed = parseStreamBlock(block);
+      if (parsed) onEvent(parsed.event, parsed.data);
+      separatorIndex = buffer.indexOf("\n\n");
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    const parsed = parseStreamBlock(buffer);
+    if (parsed) onEvent(parsed.event, parsed.data);
+  }
+}
+
 async function sendPrompt(prompt) {
   addMessage("user", prompt);
   sendButton.disabled = true;
   promptInput.disabled = true;
   updateLuziaAvatar({ ...visualState, body_state: bodyState, respondendo: true });
 
+  let assistantMessage = null;
+  let finalEventReceived = false;
+
   try {
-    const response = await fetch("/api/chat", {
+    const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
     });
-    const data = await response.json();
-    applyResult(data);
-    addMessage(data.command ? "command" : "assistant", data.response || data.message || "");
+    if (!response.ok || !response.body) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    await readEventStream(response, (event, data) => {
+      if (event === "state") {
+        applyResult(data);
+        updateLuziaAvatar({ ...visualState, body_state: bodyState, respondendo: true });
+        return;
+      }
+
+      if (event === "token") {
+        if (!assistantMessage) {
+          assistantMessage = addMessage("assistant", "", "streaming");
+        }
+        appendMessageText(assistantMessage, data.text || "");
+        return;
+      }
+
+      if (event === "done") {
+        finalEventReceived = true;
+        applyResult(data);
+        if (data.command) {
+          addMessage("command", data.response || data.message || "");
+        } else if (!assistantMessage) {
+          assistantMessage = addMessage("assistant", data.response || data.message || "");
+        } else {
+          assistantMessage.node.classList.remove("streaming", "frozen");
+          if (data.response && assistantMessage.body.textContent !== data.response) {
+            assistantMessage.body.textContent = data.response;
+          }
+        }
+        return;
+      }
+
+      if (event === "frozen") {
+        finalEventReceived = true;
+        applyResult(data);
+        if (!assistantMessage) {
+          assistantMessage = addMessage("assistant", data.response || "", "frozen");
+        }
+        assistantMessage.node.classList.remove("streaming");
+        assistantMessage.node.classList.add("frozen");
+        return;
+      }
+
+      if (event === "error") {
+        finalEventReceived = true;
+        addMessage("system", data.message || "Erro no streaming da resposta.");
+      }
+    });
+
+    if (!finalEventReceived && assistantMessage) {
+      assistantMessage.node.classList.remove("streaming");
+      assistantMessage.node.classList.add("frozen");
+    }
   } catch (error) {
     addMessage("system", `Erro na interface web: ${error.message}`);
     updateLuziaAvatar({ ...visualState, body_state: bodyState });

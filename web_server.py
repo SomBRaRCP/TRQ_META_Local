@@ -32,7 +32,7 @@ from memory_store import (
     append_conversation_summary,
 )
 from memory import record_turn_memory
-from ollama_client import generate_with_ollama
+from ollama_client import OllamaStreamError, generate_with_ollama, stream_with_ollama
 from presence_prompt import (
     build_creator_context,
     build_memory_context_prompt,
@@ -156,12 +156,8 @@ def format_memories(memories: list[dict[str, Any]]) -> str:
     )
 
 
-def process_chat(prompt: str) -> dict[str, Any]:
-    """Executa uma rodada web completa."""
-
-    command = command_response(prompt)
-    if command is not None:
-        return command
+def prepare_chat_generation(prompt: str) -> dict[str, Any]:
+    """Prepara estado TRQ, corpo digital e prompt de sistema."""
 
     state = analyze_text(prompt, conversation_state=conversation_state)
     body_state = build_digital_body_state(
@@ -194,11 +190,25 @@ def process_chat(prompt: str) -> dict[str, Any]:
     )
 
     record_ontological_warning(conversation_state, ontological_warning_allowed)
-    response = generate_with_ollama(
-        prompt=prompt,
-        model=DEFAULT_MODEL,
-        system_prompt=system_prompt,
-    )
+
+    return {
+        "state": state,
+        "body_state": body_state,
+        "system_prompt": system_prompt,
+        "relevant_memories": relevant_memories,
+    }
+
+
+def finalize_chat_generation(
+    prompt: str,
+    prepared: dict[str, Any],
+    response: str,
+) -> dict[str, Any]:
+    """Salva memoria e retorna payload publico da rodada."""
+
+    state = prepared["state"]
+    body_state = prepared["body_state"]
+    relevant_memories = prepared["relevant_memories"]
 
     save_raw_turn(
         user_prompt=prompt,
@@ -224,6 +234,22 @@ def process_chat(prompt: str) -> dict[str, Any]:
         "memories": relevant_memories,
         "saved_memories": saved_memories,
     }
+
+
+def process_chat(prompt: str) -> dict[str, Any]:
+    """Executa uma rodada web completa."""
+
+    command = command_response(prompt)
+    if command is not None:
+        return command
+
+    prepared = prepare_chat_generation(prompt)
+    response = generate_with_ollama(
+        prompt=prompt,
+        model=DEFAULT_MODEL,
+        system_prompt=prepared["system_prompt"],
+    )
+    return finalize_chat_generation(prompt, prepared, response)
 
 
 class LuziaHandler(BaseHTTPRequestHandler):
@@ -257,7 +283,74 @@ class LuziaHandler(BaseHTTPRequestHandler):
                 return
             self.send_json(process_chat(prompt))
             return
+        if parsed.path == "/api/chat/stream":
+            payload = self.read_json()
+            prompt = str(payload.get("prompt", "")).strip()
+            if not prompt:
+                self.send_json({"error": "prompt vazio"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self.stream_chat(prompt)
+            return
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def stream_chat(self, prompt: str) -> None:
+        """Envia uma rodada em Server-Sent Events para a interface."""
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+        command = command_response(prompt)
+        if command is not None:
+            self.send_stream_event("done", command)
+            return
+
+        prepared = prepare_chat_generation(prompt)
+        self.send_stream_event(
+            "state",
+            {
+                "state": dict(prepared["state"]),
+                "body_state": dict(prepared["body_state"]),
+                "conversation_state": public_conversation_state(),
+                "memories": prepared["relevant_memories"],
+            },
+        )
+
+        response_parts: list[str] = []
+        try:
+            for chunk in stream_with_ollama(
+                prompt=prompt,
+                model=DEFAULT_MODEL,
+                system_prompt=str(prepared["system_prompt"]),
+            ):
+                response_parts.append(chunk)
+                if not self.send_stream_event("token", {"text": chunk}):
+                    return
+        except OllamaStreamError as exc:
+            partial_response = "".join(response_parts).strip()
+            if partial_response:
+                payload = finalize_chat_generation(prompt, prepared, partial_response)
+                payload.update({"message": str(exc), "frozen": True})
+                self.send_stream_event("frozen", payload)
+            else:
+                self.send_stream_event("error", {"message": str(exc)})
+            return
+
+        response = "".join(response_parts).strip()
+        self.send_stream_event("done", finalize_chat_generation(prompt, prepared, response))
+
+    def send_stream_event(self, event: str, data: dict[str, Any]) -> bool:
+        """Escreve um evento SSE. Retorna False se o cliente desconectar."""
+
+        payload = json.dumps(data, ensure_ascii=False)
+        body = f"event: {event}\ndata: {payload}\n\n".encode("utf-8")
+        try:
+            self.wfile.write(body)
+            self.wfile.flush()
+            return True
+        except (BrokenPipeError, ConnectionResetError):
+            return False
 
     def read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
