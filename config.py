@@ -9,6 +9,7 @@ ou parametros do Ollama fica simples e nao exige mexer na logica do roteador.
 
 import os
 from pathlib import Path
+from typing import Final
 
 
 # Pasta raiz do projeto. Tudo que e gerado em runtime parte deste caminho.
@@ -27,10 +28,16 @@ OLLAMA_TIMEOUT_SECONDS = int(os.getenv("TRQ_OLLAMA_TIMEOUT_SECONDS", "600"))
 DEFAULT_TEMPERATURE = float(os.getenv("TRQ_TEMPERATURE", "0.2"))
 DEFAULT_NUM_CTX = int(os.getenv("TRQ_NUM_CTX", "2048"))
 
-# Ajustes opcionais de runtime. O Ollama decide o offload CUDA/CPU; aqui apenas
+# Ajustes opcionais de runtime. O Ollama decide o offload CUDA/CPU; aqui
 # encaminhamos opcoes quando o usuario informa explicitamente.
 DEFAULT_NUM_GPU = os.getenv("TRQ_NUM_GPU")
 DEFAULT_NUM_THREAD = os.getenv("TRQ_NUM_THREAD")
+
+# Boost local de offload GPU. Em Ollama, `num_gpu` representa camadas enviadas
+# para GPU, nao porcentagem real de utilizacao CUDA. O padrao de 50 aumenta o
+# valor informado em TRQ_NUM_GPU por 1.5x antes de enviar a requisicao.
+DEFAULT_GPU_BOOST_PERCENT: Final[float] = float(os.getenv("TRQ_GPU_BOOST_PERCENT", "50"))
+DEFAULT_NUM_GPU_MAX = os.getenv("TRQ_NUM_GPU_MAX")
 
 # Coeficientes canonicos usados na formula C_llm.
 COEFFICIENTS = {

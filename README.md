@@ -282,6 +282,23 @@ set TRQ_NUM_GPU=999
 set TRQ_NUM_THREAD=8
 ```
 
+Para aumentar em 50% o offload CUDA usado nas respostas, defina uma base em `TRQ_NUM_GPU`. O projeto envia ao Ollama `TRQ_NUM_GPU * 1.5` por padrao:
+
+```bash
+set TRQ_NUM_GPU=20
+set TRQ_GPU_BOOST_PERCENT=50
+python web_server.py
+```
+
+No exemplo acima, o payload enviado ao Ollama usa `num_gpu=30`. Em placas com pouca VRAM, limite o valor final:
+
+```bash
+set TRQ_NUM_GPU=20
+set TRQ_GPU_BOOST_PERCENT=50
+set TRQ_NUM_GPU_MAX=24
+python web_server.py
+```
+
 Use esses ajustes apenas se fizerem sentido para sua instalacao do Ollama, GPU, VRAM e CPU.
 
 ## Como Rodar

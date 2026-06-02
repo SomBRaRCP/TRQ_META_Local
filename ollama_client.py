@@ -7,14 +7,17 @@ estimadores e roteamento sem depender de rede, GPU ou servidor Ollama ativo.
 """
 
 import logging
+import math
 from typing import Any
 
 import requests
 
 from config import (
+    DEFAULT_GPU_BOOST_PERCENT,
     DEFAULT_MODEL,
     DEFAULT_NUM_CTX,
     DEFAULT_NUM_GPU,
+    DEFAULT_NUM_GPU_MAX,
     DEFAULT_NUM_THREAD,
     DEFAULT_TEMPERATURE,
     LOG_FILE,
@@ -39,6 +42,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _boosted_num_gpu(raw_num_gpu: str) -> int:
+    """Return num_gpu after the configured CUDA offload boost.
+
+    Ollama treats num_gpu as the number of model layers to offload to GPU, not
+    as a direct GPU utilization percentage. A 50% boost means 20 layers become
+    30 layers. TRQ_NUM_GPU_MAX can cap the result for low-VRAM cards.
+    """
+
+    base_num_gpu = int(raw_num_gpu)
+    if DEFAULT_GPU_BOOST_PERCENT <= 0:
+        boosted = base_num_gpu
+    else:
+        boosted = math.ceil(base_num_gpu * (1 + DEFAULT_GPU_BOOST_PERCENT / 100))
+
+    if DEFAULT_NUM_GPU_MAX:
+        boosted = min(boosted, int(DEFAULT_NUM_GPU_MAX))
+
+    return max(0, boosted)
+
+
 def _runtime_options(temperature: float, num_ctx: int) -> dict[str, Any]:
     """Monta o bloco `options` esperado pelo endpoint /api/generate."""
 
@@ -50,7 +73,7 @@ def _runtime_options(temperature: float, num_ctx: int) -> dict[str, Any]:
 
     # num_gpu e num_thread sao opcionais porque dependem do hardware local.
     if DEFAULT_NUM_GPU:
-        options["num_gpu"] = int(DEFAULT_NUM_GPU)
+        options["num_gpu"] = _boosted_num_gpu(DEFAULT_NUM_GPU)
     if DEFAULT_NUM_THREAD:
         options["num_thread"] = int(DEFAULT_NUM_THREAD)
 

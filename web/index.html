@@ -30,19 +30,71 @@
         </form>
       </section>
 
-      <section class="body-stage" aria-label="Corpo Digital TRQ">
-        <div id="luziaCanvas" class="canvas-host"></div>
-        <div class="body-readout">
-          <div class="readout-row">
-            <span id="bodyPosture">serena</span>
-            <strong id="bodyPresence">0.000</strong>
+      <section class="luzia-center" aria-label="Corpo Digital TRQ">
+        <div id="luziaHero" class="luzia-hero state-serena">
+          <div class="luzia-title" aria-hidden="true">CORPO DIGITAL · LUZIA</div>
+          <div class="luzia-stars"></div>
+          <div id="luziaParticles" class="luzia-particles" aria-hidden="true"></div>
+          <div class="luzia-aura"></div>
+          <div class="luzia-orbit orbit-a"></div>
+          <div class="luzia-orbit orbit-b"></div>
+          <div class="luzia-orbit orbit-c"></div>
+
+          <div class="luzia-avatar-motion" aria-hidden="true">
+            <picture>
+              <source srcset="/static/assets/luzia_motion.webp" type="image/webp" />
+              <img
+                id="luziaPersonaImg"
+                class="luzia-persona-img"
+                src="/static/assets/luzia_persona3.png"
+                alt="Corpo digital holografico da Luzia"
+              />
+            </picture>
           </div>
-          <div class="readout-row subtle">
-            <span id="bodyRegime">TRANSICAO</span>
-            <span id="bodyTier">fast</span>
+
+          <div class="luzia-base"></div>
+
+          <div class="luzia-readout readout-left">
+            <span>REGIME</span>
+            <strong id="readoutRegime">TRANSICAO</strong>
+            <span>TIER</span>
+            <strong id="readoutTier">fast</strong>
+            <span>[ S ]</span>
+            <strong id="readoutS">0.250</strong>
+            <span>[ M ]</span>
+            <strong id="readoutM">0.000</strong>
+            <span>[ C_LLM ]</span>
+            <strong id="readoutCLlm">0.000</strong>
           </div>
-          <p id="bodyVoice" class="readout-text">simples</p>
-          <p id="bodyPhrase" class="readout-text">O estado e simples; responder com precisao basta.</p>
+
+          <div class="luzia-readout readout-right">
+            <span>DELTA TRQ</span>
+            <strong id="readoutTRQ">0.000</strong>
+            <span>EXIST</span>
+            <strong id="readoutExist">0</strong>
+            <span>RUÍDO</span>
+            <strong id="readoutNoise">0.000</strong>
+            <span>FLOW</span>
+            <strong id="readoutFlow">0.100</strong>
+          </div>
+
+          <div class="luzia-status-card">
+            <div>
+              <strong id="luziaMood">serena</strong>
+              <span id="luziaRegime">TRANSICAO</span>
+              <small id="luziaTier">fast</small>
+              <p id="luziaDescription">O estado e simples; responder com precisao basta.</p>
+            </div>
+            <div class="luzia-status-wave" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <div class="luzia-status-score">
+              <strong id="luziaScore">0.000</strong>
+              <span>ΔTRQ</span>
+            </div>
+          </div>
         </div>
       </section>
 

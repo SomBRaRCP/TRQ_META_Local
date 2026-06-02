@@ -49,23 +49,53 @@ button:active {
   transform: translateY(1px);
 }
 
+.messages,
+.inspector,
+.composer textarea {
+  scrollbar-color: rgba(126, 231, 255, 0.48) rgba(4, 10, 18, 0.5);
+  scrollbar-width: thin;
+}
+
+.messages::-webkit-scrollbar,
+.inspector::-webkit-scrollbar,
+.composer textarea::-webkit-scrollbar {
+  width: 10px;
+}
+
+.messages::-webkit-scrollbar-track,
+.inspector::-webkit-scrollbar-track,
+.composer textarea::-webkit-scrollbar-track {
+  background: rgba(4, 10, 18, 0.5);
+  border-radius: 999px;
+}
+
+.messages::-webkit-scrollbar-thumb,
+.inspector::-webkit-scrollbar-thumb,
+.composer textarea::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(126, 231, 255, 0.78), rgba(255, 217, 138, 0.62));
+  border: 2px solid rgba(4, 10, 18, 0.72);
+  border-radius: 999px;
+}
+
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(340px, 0.95fr) minmax(360px, 1.15fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(340px, 0.95fr) minmax(420px, 1.18fr) minmax(320px, 0.9fr);
   height: 100vh;
   overflow: hidden;
 }
 
 .chat-panel,
 .inspector {
+  min-width: 0;
   background: var(--panel);
   border-right: 1px solid var(--line);
-  min-width: 0;
 }
 
 .chat-panel {
   display: grid;
   grid-template-rows: auto 1fr auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .topbar {
@@ -96,8 +126,11 @@ button:active {
 }
 
 .messages {
+  min-height: 0;
   padding: 18px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
 }
 
 .message {
@@ -107,6 +140,26 @@ button:active {
   background: rgba(255, 255, 255, 0.04);
   border-radius: 8px;
   line-height: 1.45;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: rgba(126, 231, 255, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.message-meta time {
+  color: rgba(255, 217, 138, 0.78);
+  font-variant-numeric: tabular-nums;
+}
+
+.message-text {
   white-space: pre-wrap;
 }
 
@@ -144,6 +197,13 @@ button:active {
   outline: none;
 }
 
+.composer textarea {
+  max-height: 150px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .composer textarea:focus,
 .memory-search input:focus {
   border-color: rgba(126, 231, 255, 0.58);
@@ -154,90 +214,521 @@ button:active {
   border-radius: 8px;
 }
 
-.body-stage {
+.luzia-center {
   position: relative;
   min-width: 0;
   overflow: hidden;
   background:
-    linear-gradient(180deg, rgba(126, 231, 255, 0.05), transparent 38%),
-    radial-gradient(circle at 50% 62%, rgba(255, 217, 138, 0.13), transparent 32%),
-    #05070a;
+    radial-gradient(circle at 50% 15%, rgba(124, 230, 255, 0.13), transparent 34%),
+    radial-gradient(circle at 50% 88%, rgba(255, 209, 138, 0.12), transparent 34%),
+    linear-gradient(180deg, #06101b 0%, #030812 58%, #02050a 100%);
+  border-left: 1px solid rgba(120, 220, 255, 0.16);
+  border-right: 1px solid rgba(120, 220, 255, 0.16);
 }
 
-.canvas-host {
+.luzia-hero {
+  --luzia-glow: 0.8;
+  --luzia-flow: 0.1;
+  --luzia-noise: 0.2;
+  --luzia-motion: 1;
+  --luzia-body-speed: 6.4s;
+  --luzia-ribbon-speed: 7.5s;
+  --luzia-pulse-speed: 3.4s;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 760px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.luzia-title {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  z-index: 8;
+  transform: translateX(-50%);
+  color: rgba(218, 244, 255, 0.76);
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  white-space: nowrap;
+}
+
+.luzia-title::before,
+.luzia-title::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 76px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(126, 231, 255, 0.74));
+}
+
+.luzia-title::before {
+  right: calc(100% + 20px);
+}
+
+.luzia-title::after {
+  left: calc(100% + 20px);
+  transform: scaleX(-1);
+}
+
+.luzia-stars {
   position: absolute;
   inset: 0;
+  z-index: 0;
+  background-image:
+    radial-gradient(circle, rgba(255, 244, 211, 0.86) 1px, transparent 1px),
+    radial-gradient(circle, rgba(126, 231, 255, 0.82) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(126, 231, 255, 0.035) 1px, transparent 1px);
+  background-size: 92px 92px, 47px 47px, 120px 120px;
+  opacity: calc(0.22 + var(--luzia-noise) * 0.12);
+  animation: cosmicDrift 26s linear infinite;
 }
 
-.canvas-host canvas {
+.luzia-particles {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.luzia-particles span {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--s);
+  height: var(--s);
+  border-radius: 50%;
+  background: rgba(225, 250, 255, 0.86);
+  box-shadow: 0 0 10px rgba(126, 231, 255, 0.48);
+  opacity: 0.46;
+  animation: particleFloat var(--d) ease-in-out var(--delay) infinite;
+}
+
+.luzia-aura {
+  position: absolute;
+  left: 50%;
+  top: 49%;
+  z-index: 1;
+  width: min(520px, 74vw);
+  height: min(690px, 80vh);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 22%, rgba(255, 255, 255, 0.25), transparent 18%),
+    radial-gradient(circle, rgba(88, 225, 255, 0.18), transparent 44%),
+    radial-gradient(circle, rgba(255, 190, 105, 0.15), transparent 69%);
+  filter: blur(25px);
+  opacity: calc(0.62 * var(--luzia-glow));
+  transform: translate(-50%, -50%);
+  animation: auraPulse 4.8s ease-in-out infinite;
+}
+
+.luzia-orbit {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 3;
+  border: 1px solid rgba(125, 235, 255, 0.28);
+  border-radius: 50%;
+  pointer-events: none;
+  filter: drop-shadow(0 0 10px rgba(125, 235, 255, 0.20));
+}
+
+.luzia-orbit::before,
+.luzia-orbit::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 225, 158, 0.92);
+  box-shadow:
+    0 0 14px rgba(255, 217, 138, 0.86),
+    0 0 28px rgba(126, 231, 255, 0.35);
+  transform: translate(-50%, -50%);
+  animation: orbitNodePulse var(--luzia-pulse-speed) ease-in-out infinite;
+}
+
+.luzia-orbit::before {
+  left: 0;
+}
+
+.luzia-orbit::after {
+  left: 100%;
+  animation-delay: -1.4s;
+}
+
+.orbit-a {
+  width: min(610px, 88vw);
+  height: min(180px, 22vh);
+  border-color: rgba(125, 235, 255, 0.38);
+  transform: translate(-50%, -50%) rotate(-8deg);
+  animation: orbitSpinA 19s linear infinite;
+}
+
+.orbit-b {
+  width: min(430px, 67vw);
+  height: min(650px, 76vh);
+  border-color: rgba(255, 200, 118, 0.30);
+  transform: translate(-50%, -50%) rotate(12deg);
+  animation: orbitSpinB 27s linear infinite;
+}
+
+.orbit-c {
+  width: min(560px, 80vw);
+  height: min(560px, 65vh);
+  border-color: rgba(255, 255, 255, 0.13);
+  transform: translate(-50%, -50%);
+  animation: orbitPulse 8s ease-in-out infinite;
+}
+
+.luzia-avatar-motion {
+  position: absolute;
+  left: 50%;
+  top: 47%;
+  z-index: 5;
+  width: min(440px, 76%);
+  aspect-ratio: 308 / 476;
+  max-height: min(720px, 82vh);
+  transform: translate(-50%, -50%);
+  transform-origin: 50% 64%;
+  pointer-events: none;
+  animation: none;
+  will-change: transform;
+}
+
+.luzia-avatar-motion picture {
   display: block;
   width: 100%;
   height: 100%;
 }
 
-.body-readout {
+.luzia-avatar-motion::before,
+.luzia-avatar-motion::after {
+  content: none;
+}
+
+.luzia-persona-img {
   position: absolute;
-  left: 22px;
-  right: 22px;
-  bottom: 20px;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  mix-blend-mode: normal;
+  filter:
+    drop-shadow(0 0 calc(18px * var(--luzia-glow)) rgba(125, 235, 255, 0.58))
+    drop-shadow(0 0 calc(46px * var(--luzia-glow)) rgba(255, 213, 143, 0.36));
+  animation: bodyGlow 3.8s ease-in-out infinite;
+  will-change: opacity, filter;
+}
+
+.luzia-ribbons,
+.luzia-body-lights {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.luzia-ribbons span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 76%;
+  height: 2px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, transparent, rgba(126, 231, 255, 0.42), rgba(255, 236, 190, 0.86), transparent);
+  filter: blur(1px) drop-shadow(0 0 9px rgba(255, 217, 138, 0.45));
+  opacity: 0.48;
+  transform-origin: 50% 50%;
+  animation: ribbonFlow var(--luzia-ribbon-speed) ease-in-out infinite;
+}
+
+.luzia-ribbons .ribbon-a {
+  top: 32%;
+  transform: translate(-50%, -50%) rotate(34deg);
+}
+
+.luzia-ribbons .ribbon-b {
+  top: 43%;
+  width: 68%;
+  transform: translate(-50%, -50%) rotate(-42deg);
+  animation-delay: -1.9s;
+}
+
+.luzia-ribbons .ribbon-c {
+  top: 58%;
+  width: 80%;
+  transform: translate(-50%, -50%) rotate(24deg);
+  animation-delay: -3.4s;
+}
+
+.luzia-ribbons .ribbon-d {
+  top: 72%;
+  width: 64%;
+  transform: translate(-50%, -50%) rotate(-30deg);
+  animation-delay: -4.7s;
+}
+
+.luzia-light-node {
+  position: absolute;
+  width: clamp(10px, 3.2vw, 19px);
+  height: clamp(10px, 3.2vw, 19px);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #fffdf3 0 22%, #ffe29a 34%, rgba(255, 187, 94, 0.55) 60%, transparent 72%);
+  box-shadow:
+    0 0 14px rgba(255, 221, 145, 0.98),
+    0 0 32px rgba(255, 190, 105, 0.58),
+    0 0 56px rgba(126, 231, 255, 0.20);
+  transform: translate(-50%, -50%);
+  animation: bodyNodePulse var(--luzia-pulse-speed) ease-in-out infinite;
+}
+
+.node-crown { left: 50%; top: 13%; animation-delay: -0.2s; }
+.node-chest { left: 50%; top: 31%; width: clamp(16px, 4.5vw, 28px); height: clamp(16px, 4.5vw, 28px); animation-delay: -1.1s; }
+.node-left-shoulder { left: 33%; top: 28%; animation-delay: -0.7s; }
+.node-right-shoulder { left: 67%; top: 28%; animation-delay: -1.6s; }
+.node-left-hand { left: 22%; top: 49%; animation-delay: -2.0s; }
+.node-right-hand { left: 78%; top: 49%; animation-delay: -2.7s; }
+.node-core { left: 50%; top: 48%; animation-delay: -0.4s; }
+.node-left-hip { left: 42%; top: 55%; animation-delay: -1.7s; }
+.node-right-hip { left: 58%; top: 55%; animation-delay: -2.4s; }
+.node-left-knee { left: 45%; top: 75%; animation-delay: -0.9s; }
+.node-right-knee { left: 55%; top: 75%; animation-delay: -1.9s; }
+.node-feet { left: 50%; top: 93%; width: clamp(18px, 5vw, 34px); height: clamp(18px, 5vw, 34px); animation-delay: -2.9s; }
+
+.luzia-base {
+  position: absolute;
+  left: 50%;
+  bottom: 142px;
+  z-index: 4;
+  width: min(430px, 72vw);
+  height: 88px;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  background:
+    repeating-radial-gradient(
+      ellipse at center,
+      rgba(140, 235, 255, 0.48) 0,
+      rgba(140, 235, 255, 0.48) 1px,
+      transparent 2px,
+      transparent 16px
+    );
+  filter: drop-shadow(0 0 22px rgba(125, 235, 255, 0.48));
+  opacity: 0.74;
+  animation: platformPulse 3.5s ease-in-out infinite;
+}
+
+.luzia-base::before,
+.luzia-base::after {
+  content: "";
+  position: absolute;
+  inset: 18px 40px;
+  border: 1px solid rgba(178, 240, 255, 0.38);
+  border-radius: 50%;
+  opacity: 0;
+  transform: scaleX(0.58) scaleY(0.64);
+  animation: baseRipple 3.6s ease-out infinite;
+}
+
+.luzia-base::after {
+  animation-delay: -1.8s;
+}
+
+.luzia-readout {
+  position: absolute;
+  top: 104px;
+  z-index: 8;
+  width: 130px;
   display: grid;
-  gap: 7px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
+  gap: 6px;
+  color: rgba(225, 246, 255, 0.86);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.luzia-readout span {
+  color: rgba(105, 216, 244, 0.76);
+  font-size: 10px;
+  letter-spacing: 0.10em;
+}
+
+.luzia-readout strong {
+  padding: 0 0 10px;
+  border-bottom: 1px solid rgba(126, 231, 255, 0.14);
+  color: rgba(244, 250, 255, 0.96);
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.readout-left {
+  left: 34px;
+}
+
+.readout-right {
+  right: 34px;
+  text-align: right;
+}
+
+.luzia-status-card {
+  position: absolute;
+  left: 34px;
+  right: 34px;
+  bottom: 24px;
+  z-index: 9;
+  min-height: 108px;
+  padding: 16px 22px;
+  border: 1px solid rgba(125, 235, 255, 0.24);
   border-radius: 8px;
-  background: rgba(5, 8, 12, 0.64);
-  backdrop-filter: blur(10px);
-}
-
-.readout-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
+  background:
+    linear-gradient(135deg, rgba(6, 16, 26, 0.90), rgba(4, 10, 18, 0.76));
+  box-shadow:
+    inset 0 0 28px rgba(125, 235, 255, 0.05),
+    0 18px 50px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(14px);
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(100px, 0.8fr) auto;
   align-items: center;
+  gap: 22px;
+  color: #d9f7ff;
 }
 
-.readout-row span {
-  color: var(--cyan);
+.luzia-status-card strong {
+  display: block;
+  color: #62ecff;
+  font-size: 18px;
   overflow-wrap: anywhere;
 }
 
-.readout-row strong {
-  color: var(--gold);
+.luzia-status-card span {
+  display: block;
+  margin-top: 8px;
+  color: #c8d8e6;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
 }
 
-.readout-row.subtle span {
-  color: var(--muted);
-  font-size: 12px;
+.luzia-status-card small {
+  display: block;
+  margin-top: 6px;
+  color: #8fa6b8;
 }
 
-.readout-text {
-  margin: 0;
-  color: var(--muted);
+.luzia-status-card p {
+  margin: 8px 0 0;
+  color: rgba(211, 230, 242, 0.80);
   font-size: 12px;
   line-height: 1.35;
 }
 
-.canvas-fallback {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  text-align: center;
-  color: var(--muted);
+.luzia-status-wave {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  opacity: 0.68;
 }
 
-.canvas-fallback strong {
-  display: block;
-  color: var(--cyan);
-  margin-bottom: 8px;
+.luzia-status-wave span {
+  width: 3px;
+  height: 35%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(126, 231, 255, 0.86), rgba(126, 231, 255, 0.15));
+  animation: wavePulse 1.8s ease-in-out infinite;
+}
+
+.luzia-status-wave span:nth-child(2n) { animation-delay: -0.3s; }
+.luzia-status-wave span:nth-child(3n) { animation-delay: -0.8s; }
+.luzia-status-wave span:nth-child(5n) { animation-delay: -1.1s; }
+
+.luzia-status-score {
+  min-width: 80px;
+  text-align: right;
+}
+
+.luzia-status-score strong {
+  color: #ffe29a;
+  font-size: 28px;
+}
+
+.state-transicao .orbit-a {
+  animation-duration: 14s;
+}
+
+.state-transicao .luzia-aura {
+  opacity: calc(0.72 * var(--luzia-glow));
+}
+
+.state-profundo .luzia-aura {
+  width: min(570px, 82vw);
+  height: min(730px, 86vh);
+  animation-duration: 7.8s;
+}
+
+.state-profundo .orbit-a,
+.state-profundo .orbit-b {
+  animation-duration: 34s;
+}
+
+.state-profundo .luzia-particles span {
+  opacity: 0.32;
+}
+
+.state-profundo .luzia-avatar-motion {
+  animation-duration: 8.8s;
+}
+
+.state-respondendo .luzia-aura {
+  animation-duration: 1.8s;
+  opacity: 0.95;
+}
+
+.state-respondendo .luzia-avatar-motion {
+  animation-duration: 3.4s;
+}
+
+.state-respondendo .luzia-ribbons span {
+  opacity: 0.72;
+  animation-duration: 4.2s;
+}
+
+.state-respondendo .luzia-light-node {
+  animation-duration: 1.7s;
+}
+
+.state-respondendo .luzia-persona-img {
+  filter:
+    drop-shadow(0 0 26px rgba(125, 235, 255, 0.84))
+    drop-shadow(0 0 62px rgba(255, 210, 130, 0.56));
+}
+
+.state-ouvindo .luzia-persona-img {
+  filter:
+    drop-shadow(0 0 18px rgba(125, 235, 255, 0.78))
+    drop-shadow(0 0 34px rgba(255, 255, 255, 0.32));
+}
+
+.state-ouvindo .luzia-avatar-motion {
+  animation-duration: 7.2s;
 }
 
 .inspector {
   border-left: 1px solid var(--line);
   border-right: 0;
-  overflow: auto;
+  height: 100vh;
+  max-height: 100vh;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
   padding: 18px;
+  scrollbar-gutter: stable;
 }
 
 .panel-section {
@@ -313,18 +804,246 @@ button:active {
   margin-bottom: 4px;
 }
 
+@keyframes luziaBodyMotion {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+  18% {
+    transform: translate(-50%, -50%) translate3d(-3px, -13px, 0) rotate(-0.55deg) scale(1.008);
+  }
+  38% {
+    transform: translate(-50%, -50%) translate3d(4px, -7px, 0) rotate(0.42deg) scale(1.014);
+  }
+  62% {
+    transform: translate(-50%, -50%) translate3d(2px, -19px, 0) rotate(0.28deg) scale(1.01);
+  }
+  82% {
+    transform: translate(-50%, -50%) translate3d(-4px, -8px, 0) rotate(-0.38deg) scale(1.006);
+  }
+}
+
+@keyframes hairCurrent {
+  0%,
+  100% {
+    transform: translate3d(-6px, 0, 0) skewX(-8deg) scaleX(0.96);
+    opacity: calc(0.22 + var(--luzia-flow) * 0.40);
+  }
+  44% {
+    transform: translate3d(15px, -5px, 0) skewX(-2deg) scaleX(1.08);
+    opacity: calc(0.34 + var(--luzia-flow) * 0.52);
+  }
+  72% {
+    transform: translate3d(5px, 3px, 0) skewX(-11deg) scaleX(1.02);
+  }
+}
+
+@keyframes veilCurrent {
+  0%,
+  100% {
+    transform: translate3d(-7px, 8px, 0) rotate(-1deg) scaleY(0.98);
+    opacity: calc(0.20 + var(--luzia-glow) * 0.13);
+  }
+  45% {
+    transform: translate3d(9px, -10px, 0) rotate(1.4deg) scaleY(1.04);
+    opacity: calc(0.31 + var(--luzia-glow) * 0.18);
+  }
+  72% {
+    transform: translate3d(-2px, -2px, 0) rotate(-0.5deg) scaleY(1.01);
+  }
+}
+
+@keyframes ribbonFlow {
+  0%,
+  100% {
+    opacity: 0.26;
+    background-position: -120px 0;
+    filter: blur(1px) drop-shadow(0 0 7px rgba(255, 217, 138, 0.28));
+  }
+  42% {
+    opacity: calc(0.48 + var(--luzia-flow) * 0.44);
+    background-position: 160px 0;
+    filter: blur(1.5px) drop-shadow(0 0 15px rgba(255, 217, 138, 0.56));
+  }
+  70% {
+    opacity: 0.38;
+  }
+}
+
+@keyframes bodyNodePulse {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: translate(-50%, -50%) scale(0.78);
+    box-shadow:
+      0 0 10px rgba(255, 221, 145, 0.78),
+      0 0 22px rgba(255, 190, 105, 0.36),
+      0 0 42px rgba(126, 231, 255, 0.16);
+  }
+  45% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(calc(1.02 + var(--luzia-motion) * 0.10));
+    box-shadow:
+      0 0 18px rgba(255, 248, 224, 1),
+      0 0 42px rgba(255, 196, 107, 0.72),
+      0 0 78px rgba(126, 231, 255, 0.30);
+  }
+}
+
+@keyframes orbitNodePulse {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: translate(-50%, -50%) scale(0.82);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.3);
+  }
+}
+
+@keyframes baseRipple {
+  0% {
+    opacity: 0.52;
+    transform: scaleX(0.48) scaleY(0.45);
+  }
+  76% {
+    opacity: 0;
+    transform: scaleX(1.42) scaleY(1.16);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1.55) scaleY(1.24);
+  }
+}
+
+@keyframes wavePulse {
+  0%,
+  100% {
+    height: 22%;
+    opacity: 0.35;
+  }
+  45% {
+    height: 90%;
+    opacity: 1;
+  }
+}
+
+@keyframes luziaFloat {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, calc(-50% - 18px)) scale(1.012);
+  }
+}
+
+@keyframes bodyGlow {
+  0%,
+  100% {
+    opacity: 0.92;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes auraPulse {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(0.96);
+    opacity: calc(0.48 * var(--luzia-glow));
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.08);
+    opacity: calc(0.82 * var(--luzia-glow));
+  }
+}
+
+@keyframes platformPulse {
+  0%,
+  100% {
+    transform: translateX(-50%) scaleX(0.94);
+    opacity: 0.48;
+  }
+  50% {
+    transform: translateX(-50%) scaleX(1.06);
+    opacity: 0.84;
+  }
+}
+
+@keyframes orbitSpinA {
+  from {
+    transform: translate(-50%, -50%) rotate(-8deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(352deg);
+  }
+}
+
+@keyframes orbitSpinB {
+  from {
+    transform: translate(-50%, -50%) rotate(12deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(-348deg);
+  }
+}
+
+@keyframes orbitPulse {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(0.96);
+    opacity: 0.22;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.05);
+    opacity: 0.44;
+  }
+}
+
+@keyframes cosmicDrift {
+  from {
+    background-position: 0 0, 0 0, 0 0;
+  }
+  to {
+    background-position: 220px 480px, -180px 320px, 96px 0;
+  }
+}
+
+@keyframes particleFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.16;
+  }
+  45% {
+    transform: translate3d(var(--drift), -34px, 0);
+    opacity: 0.72;
+  }
+}
+
 @media (max-width: 1080px) {
   .app-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(520px, 72vh) minmax(520px, auto) auto;
+    grid-template-rows: minmax(560px, 78vh) minmax(520px, auto) auto;
     height: auto;
     min-height: 100vh;
     overflow: visible;
   }
 
-  .body-stage {
+  .luzia-center {
     order: 1;
-    min-height: 520px;
+    min-height: 560px;
+  }
+
+  .luzia-hero {
+    min-height: 560px;
+  }
+
+  .luzia-readout {
+    display: none;
   }
 
   .chat-panel {
@@ -335,5 +1054,49 @@ button:active {
   .inspector {
     order: 3;
     max-height: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    padding: 16px;
+  }
+
+  .messages,
+  .composer,
+  .inspector {
+    padding: 14px;
+  }
+
+  .luzia-title {
+    font-size: 10px;
+    letter-spacing: 0.16em;
+  }
+
+  .luzia-avatar-motion {
+    width: min(370px, 88%);
+    max-height: min(560px, 72vh);
+    top: 46%;
+  }
+
+  .luzia-base {
+    bottom: 112px;
+    width: min(300px, 76vw);
+  }
+
+  .luzia-status-card {
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    padding: 13px 14px;
+    grid-template-columns: 1fr auto;
+  }
+
+  .luzia-status-wave {
+    display: none;
+  }
+
+  .luzia-status-score strong {
+    font-size: 22px;
   }
 }
