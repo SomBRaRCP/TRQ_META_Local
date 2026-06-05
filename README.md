@@ -4,6 +4,13 @@ TRQ META Local e uma primeira implementacao funcional de um orquestrador local p
 
 Este sistema mede sinais textuais, classifica regime, roteia a resposta e expressa uma postura simbolico-operacional.
 
+O projeto tem hoje **duas camadas que cooperam**:
+
+1. **Chat da Luzia (porta 7860)** — o orquestrador simbolico-operacional descrito acima (Python puro, `web_server.py`).
+2. **Pipeline Real (porta 8000)** — um backend FastAPI (`luzia_trq_backend_real/`) que trata o prompt como *estimulo semantico*, calcula as metricas TRQ de 5 termos, faz co-registro vetorial em SQLite e decide expansao regional NQC.
+
+Um **modo hibrido** liga as duas: um botao no chat alterna entre a conversa normal e a execucao pelo Pipeline Real, mostrando as metricas TRQ reais na propria tela do chat. Veja a secao **Modo Hibrido**.
+
 ## Persona Luzia
 
 Luzia e a persona simbolico-operacional do projeto TRQ META. Ela fala em tom feminino, firme, cuidadoso, inteligente, poetico quando apropriado e tecnicamente preciso.
@@ -235,16 +242,37 @@ TRQ_META_LOCAL/
 |   |-- corrections_log.json
 |   |-- conversation_summaries.md
 |   `-- raw_conversations/
-`-- logs/
-    `-- trq_meta.log
+|-- logs/
+|   `-- trq_meta.log
+`-- luzia_trq_backend_real/        # Pipeline Real (FastAPI, porta 8000)
+    |-- app/
+    |   |-- main.py                # rotas FastAPI (/, /health, /api/pipeline/run)
+    |   |-- pipeline.py            # estimulo -> geracao -> metricas -> co-registro -> decisao
+    |   |-- metrics.py             # formula de 5 termos C = aI - bS + dF + gD - lA
+    |   |-- vector.py              # embeddings, cosseno, drift semantico
+    |   |-- storage.py             # SQLite (WAL) + JSONL compartilhados
+    |   |-- ollama_client.py       # cliente Ollama (geracao + embeddings, com fallback)
+    |   |-- constants.py           # COEF, NQC_WEIGHTS, STIM_TYPES, TRQ_TERMS
+    |   `-- config.py
+    |-- frontend/
+    |   `-- apiClient.js
+    |-- data/                      # luzia_trq.sqlite3 + JSONL (memoria compartilhada)
+    `-- requirements.txt
 ```
 
 ## Requisitos
 
+Chat da Luzia (7860):
+
 - Python 3.11+
 - Ollama instalado e ativo
-- Modelo local `gpt-oss:20b`
+- Modelo de geracao local `gpt-oss:20b`
 - Dependencia Python leve: `requests`
+
+Pipeline Real (8000) — opcional, necessario apenas para o modo hibrido:
+
+- `fastapi`, `uvicorn[standard]`, `httpx`, `pydantic` (ver `luzia_trq_backend_real/requirements.txt`)
+- Modelo de embeddings `nomic-embed-text` (para o drift semantico real). Sem ele, o pipeline cai num embedding determinístico por hash e ainda funciona, mas a similaridade estimulo-resposta deixa de ser semantica.
 
 ## Instalacao
 
@@ -372,6 +400,87 @@ Mapeamento visual principal:
 - `existential_score` aprofunda a cor e desacelera o halo.
 - `gibberish_score` muda o tom para alerta e aumenta instabilidade.
 - `C_llm` aumenta a luminosidade geral.
+
+## Modo Hibrido: Pipeline Real (8000) e Memoria Compartilhada
+
+O modo hibrido conecta o chat (7860) ao **Pipeline Real** (FastAPI, 8000). Na interface web ha um botao **"Modo: Chat <-> Pipeline Real"**:
+
+- **Modo Chat:** comportamento original (roteador TRQ, persona, Corpo Digital, streaming).
+- **Modo Pipeline Real:** a Luzia trata a mensagem como *estimulo semantico*, roda o pipeline e mostra as metricas TRQ reais (I, S, F, D, A, C, drift semantico, decisao de expansao NQC) num cartao dentro do chat.
+
+Comandos `/...` continuam indo pelo chat mesmo no modo Pipeline.
+
+### Como o chat aciona o pipeline
+
+O navegador fala apenas com o 7860. O `web_server.py` faz proxy para o 8000 por dentro:
+
+```text
+navegador -> POST /api/pipeline/chat (7860) -> POST /api/pipeline/run (8000) -> Ollama -> metricas -> resposta
+```
+
+### Formula de 5 termos do pipeline
+
+Enquanto o chat usa `C_llm = alpha*I - beta*S_norm + delta*F_flow_norm + epsilon*M`, o Pipeline Real usa a formula expandida de 5 termos (escala 0..100):
+
+```text
+C = alpha*I - beta*S + delta*F + gamma*D - lambda*A
+COEF: alpha=0.42  beta=0.06  delta=0.30  gamma=0.28  lambda=0.18  threshold=62.0
+```
+
+- **I** densidade informacional / diversidade lexica
+- **S** entropia estrutural (variacao de comprimento das sentencas)
+- **F** coerencia formal hibrida (palavras-chave TRQ + similaridade semantica + aterramento)
+- **D** densidade de desenvolvimento (comprimento x profundidade conceitual)
+- **A** ambiguidade/vagueza + **drift semantico** (penaliza resposta que se afasta do estimulo)
+- **C > threshold** sustenta a decisao de expandir o NQC primario do tipo de estimulo
+
+### Drift semantico (verdade, nao repeticao)
+
+A penalidade de drift compara o **significado** do estimulo e da resposta por similaridade de cosseno entre embeddings, nao por sobreposicao de palavras:
+
+```text
+drift = 100 - similaridade(estimulo, resposta)
+penalidade_A = max(0, drift - 35) * 0.6
+```
+
+Assim a resposta pode expandir, teorizar e poetizar; so e penalizada se realmente perder o vinculo semantico com o centro. Uma resposta on-topic com similaridade ~82% recebe penalidade A = 0.
+
+### Memoria compartilhada (SQLite)
+
+Os dois processos compartilham um unico banco `luzia_trq_backend_real/data/luzia_trq.sqlite3`. O `storage.py` usa **WAL + busy_timeout** para leitura/escrita concorrente sem travar. O 8000 grava cada rodada; o 7860 le as rodadas (`GET /api/pipeline/runs`) e o proprio pipeline recupera memorias anteriores por similaridade vetorial para usar como contexto.
+
+> Importante: o 8000 deve rodar com diretorio de trabalho em `luzia_trq_backend_real/`, senao o caminho relativo `./data/` aponta para outro lugar e a memoria compartilhada quebra.
+
+### Como rodar o modo hibrido
+
+Terminal 1 — Pipeline Real (8000):
+
+```bash
+cd luzia_trq_backend_real
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+ollama pull nomic-embed-text
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Terminal 2 — Chat da Luzia (7860):
+
+```bash
+python web_server.py
+```
+
+Abra `http://127.0.0.1:7860`, clique em **"Modo: Chat"** para virar **"Modo: Pipeline Real"**, escolha o tipo de estimulo e envie.
+
+### Endpoints do Pipeline Real (8000)
+
+```text
+GET  /                     pagina de status
+GET  /health               status do backend + Ollama
+POST /api/pipeline/run     roda o pipeline (estimulo -> resposta + metricas)
+GET  /api/pipeline/runs    rodadas recentes
+GET  /docs                 documentacao interativa (Swagger)
+```
 
 ## Como Testar
 

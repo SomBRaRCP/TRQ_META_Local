@@ -6,6 +6,14 @@ const metricsGrid = document.querySelector("#metricsGrid");
 const bodyGrid = document.querySelector("#bodyGrid");
 const memoryList = document.querySelector("#memoryList");
 const memoryQuery = document.querySelector("#memoryQuery");
+const modeToggle = document.querySelector("#modeToggle");
+const stimType = document.querySelector("#stimType");
+const pipelineGrid = document.querySelector("#pipelineGrid");
+const pipelineRuns = document.querySelector("#pipelineRuns");
+
+// Modo da interface: "chat" (7860, comportamento original) ou "pipeline"
+// (aciona o Pipeline Real em 8000 por proxy e mostra as métricas TRQ reais).
+let mode = "chat";
 
 const luziaHero = document.querySelector("#luziaHero");
 const luziaPersonaImg = document.querySelector("#luziaPersonaImg");
@@ -336,6 +344,15 @@ async function sendPrompt(prompt) {
   promptInput.disabled = true;
   updateLuziaAvatar({ ...visualState, body_state: bodyState, respondendo: true });
 
+  // Indicador enquanto o modelo carrega/processa; some no 1º token.
+  let pending = addMessage("system", "Luzia está pensando…");
+  const clearPending = () => {
+    if (pending) {
+      pending.node.remove();
+      pending = null;
+    }
+  };
+
   let assistantMessage = null;
   let finalEventReceived = false;
 
@@ -357,6 +374,7 @@ async function sendPrompt(prompt) {
       }
 
       if (event === "token") {
+        clearPending();
         if (!assistantMessage) {
           assistantMessage = addMessage("assistant", "", "streaming");
         }
@@ -405,6 +423,7 @@ async function sendPrompt(prompt) {
     addMessage("system", `Erro na interface web: ${error.message}`);
     updateLuziaAvatar({ ...visualState, body_state: bodyState });
   } finally {
+    clearPending();
     sendButton.disabled = false;
     promptInput.disabled = false;
     updateLuziaAvatar({ ...visualState, body_state: bodyState });
@@ -418,12 +437,207 @@ if (luziaPersonaImg) {
   });
 }
 
+function formatNum(value, digits = 1) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toFixed(digits) : "?";
+}
+
+function renderPipelineMetricsCard(message, data) {
+  const metrics = data.metrics || {};
+  const coreg = data.coregistration || {};
+  const decision = data.decision || {};
+  const gen = data.generation || {};
+  const expand = Boolean(metrics.expand);
+
+  const card = document.createElement("div");
+  card.className = "pipeline-metrics";
+  card.innerHTML = `
+    <div class="pm-row pm-head">
+      <span>PIPELINE REAL · ${data.source || "?"}</span>
+      <span>${formatNum(gen.tps, 1)} tk/s</span>
+    </div>
+    <div class="pm-grid">
+      <span>I</span><span>S</span><span>F</span><span>D</span><span>A</span><span>C</span>
+      <b>${formatNum(metrics.I)}</b><b>${formatNum(metrics.S)}</b><b>${formatNum(metrics.F)}</b>
+      <b>${formatNum(metrics.D)}</b><b>${formatNum(metrics.A)}</b>
+      <b class="${expand ? "pm-ok" : "pm-warn"}">${formatNum(metrics.C, 2)}</b>
+    </div>
+    <div class="pm-row">
+      <span>Drift semântico (ligação estímulo↔resposta)</span>
+      <b>${formatNum(coreg.stimulus_similarity_score, 1)}%</b>
+    </div>
+    <div class="pm-row">
+      <span>Expansão NQC·${decision.primary_nqc || "?"}</span>
+      <b class="${expand ? "pm-ok" : "pm-warn"}">${expand ? "ATINGIDA ✓" : "não atingida ✗"} (limiar ${metrics.threshold ?? "?"})</b>
+    </div>
+    <div class="pm-reason">${decision.reason || ""}</div>
+  `;
+  message.node.appendChild(card);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function applyPipelineToInspector(data) {
+  if (!pipelineGrid) return;
+  const metrics = data.metrics || {};
+  const coreg = data.coregistration || {};
+  const gen = data.generation || {};
+  setGrid(
+    pipelineGrid,
+    {
+      source: data.source || "?",
+      tps: formatNum(gen.tps, 1),
+      I: formatNum(metrics.I),
+      S: formatNum(metrics.S),
+      F: formatNum(metrics.F),
+      D: formatNum(metrics.D),
+      A: formatNum(metrics.A),
+      C: formatNum(metrics.C, 2),
+      threshold: metrics.threshold ?? "?",
+      expand: String(Boolean(metrics.expand)),
+      stimulus_similarity: formatNum(coreg.stimulus_similarity_score, 1),
+      semantic_score: formatNum(coreg.semantic_score, 1),
+    },
+    [
+      "source", "tps", "I", "S", "F", "D", "A", "C",
+      "threshold", "expand", "stimulus_similarity", "semantic_score",
+    ],
+  );
+}
+
+async function loadPipelineRuns() {
+  if (!pipelineRuns) return;
+  try {
+    const response = await fetch("/api/pipeline/runs?limit=8");
+    const data = await response.json();
+    const runs = data.runs || [];
+    pipelineRuns.replaceChildren();
+    if (!runs.length) {
+      const empty = document.createElement("div");
+      empty.className = "memory-item";
+      empty.textContent = "Nenhuma rodada de pipeline na memória compartilhada ainda.";
+      pipelineRuns.appendChild(empty);
+      return;
+    }
+    runs.forEach((run) => {
+      const item = document.createElement("div");
+      item.className = "memory-item";
+      const cVal = run.metrics && run.metrics.C != null ? Number(run.metrics.C).toFixed(1) : "?";
+      item.innerHTML = `<strong>[${run.stim_type}] C=${cVal} · ${run.source}</strong>${(run.stimulus || "").slice(0, 90)}`;
+      pipelineRuns.appendChild(item);
+    });
+  } catch (error) {
+    /* silencioso: o Pipeline Real (8000) pode estar fora do ar */
+  }
+}
+
+async function sendPromptPipeline(prompt) {
+  if (prompt.length < 3) {
+    addMessage("user", prompt);
+    addMessage("system", "O modo Pipeline Real precisa de um estímulo com pelo menos 3 caracteres.");
+    return;
+  }
+  addMessage("user", prompt);
+  sendButton.disabled = true;
+  promptInput.disabled = true;
+  updateLuziaAvatar({ ...visualState, body_state: bodyState, respondendo: true });
+
+  // Indicador enquanto o estímulo é embeddado e o modelo carrega; some no 1º token.
+  let pending = addMessage("system", "Luzia está pensando…");
+  const clearPending = () => {
+    if (pending) {
+      pending.node.remove();
+      pending = null;
+    }
+  };
+
+  let assistant = null;
+  let finished = false;
+
+  try {
+    const response = await fetch("/api/pipeline/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, stim_type: stimType?.value || "sistemico" }),
+    });
+    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+
+    await readEventStream(response, (event, data) => {
+      if (event === "token") {
+        // Tokens reais do gpt-oss:20b chegando conforme sao gerados.
+        clearPending();
+        if (!assistant) assistant = addMessage("assistant", "", "pipeline streaming");
+        appendMessageText(assistant, data.text || "");
+        return;
+      }
+
+      if (event === "done") {
+        finished = true;
+        clearPending();
+        if (!assistant) {
+          assistant = addMessage("assistant", data.response || "(sem resposta do pipeline)", "pipeline");
+        }
+        assistant.node.classList.remove("streaming");
+        if (data.response && assistant.body.textContent !== data.response) {
+          assistant.body.textContent = data.response;
+        }
+        renderPipelineMetricsCard(assistant, data);
+        applyPipelineToInspector(data);
+        loadPipelineRuns();
+        return;
+      }
+
+      if (event === "error") {
+        finished = true;
+        clearPending();
+        addMessage("system", data.message || data.error || "Erro no streaming do pipeline.");
+      }
+    });
+
+    clearPending();
+    if (!finished && assistant) assistant.node.classList.remove("streaming");
+  } catch (error) {
+    clearPending();
+    addMessage("system", `Erro na interface (pipeline): ${error.message}`);
+  } finally {
+    sendButton.disabled = false;
+    promptInput.disabled = false;
+    updateLuziaAvatar({ ...visualState, body_state: bodyState });
+    promptInput.focus();
+  }
+}
+
+function setMode(next) {
+  mode = next;
+  const isPipeline = mode === "pipeline";
+  modeToggle.dataset.mode = mode;
+  modeToggle.textContent = isPipeline ? "Modo: Pipeline Real" : "Modo: Chat";
+  modeToggle.classList.toggle("pipeline", isPipeline);
+  if (stimType) stimType.hidden = !isPipeline;
+  promptInput.placeholder = isPipeline
+    ? "Estímulo para o Pipeline Real (8000)…"
+    : "Digite para Luzia ou use /ajuda";
+  addMessage(
+    "system",
+    isPipeline
+      ? "Modo Pipeline Real ativado — a Luzia roda o estímulo pelo pipeline (8000) e mostra as métricas TRQ reais. (/comandos continuam indo pelo chat.)"
+      : "Modo Chat — conversa normal com a Luzia (7860).",
+  );
+  if (isPipeline) loadPipelineRuns();
+}
+
+modeToggle.addEventListener("click", () => setMode(mode === "chat" ? "pipeline" : "chat"));
+
 promptForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const prompt = promptInput.value.trim();
   if (!prompt) return;
   promptInput.value = "";
-  sendPrompt(prompt);
+  // Em modo pipeline, comandos com / continuam indo pelo chat (memórias etc.).
+  if (mode === "pipeline" && !prompt.startsWith("/")) {
+    sendPromptPipeline(prompt);
+  } else {
+    sendPrompt(prompt);
+  }
 });
 
 document.querySelector("#helpButton").addEventListener("click", () => sendPrompt("/ajuda"));

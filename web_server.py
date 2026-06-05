@@ -8,11 +8,15 @@ Usa apenas biblioteca padrao para expor a interface web e endpoints JSON.
 import argparse
 import json
 import mimetypes
+import os
+import sqlite3
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+
+import requests
 
 from config import BASE_DIR, DEFAULT_MODEL, ensure_runtime_dirs
 from creator_profile import get_creator_profile
@@ -50,6 +54,73 @@ from trq_router import (
 WEB_DIR = BASE_DIR / "web"
 STATIC_DIR = WEB_DIR
 conversation_state = create_conversation_state()
+
+# Endereco do backend de Pipeline Real (FastAPI, porta 8000) que o chat aciona
+# no modo hibrido. Sobrescrevivel por variavel de ambiente.
+PIPELINE_BASE_URL = os.getenv("TRQ_PIPELINE_URL", "http://127.0.0.1:8000")
+
+# Banco SQLite compartilhado: o pipeline (8000) grava as rodadas aqui e o chat
+# (7860) le as mesmas rodadas em modo somente-leitura. E a "memoria compartilhada".
+SHARED_DB_PATH = BASE_DIR / "luzia_trq_backend_real" / "data" / "luzia_trq.sqlite3"
+
+
+def run_pipeline_via_backend(prompt: str, stim_type: str = "sistemico") -> dict[str, Any]:
+    """Aciona o Pipeline Real (8000) por proxy e devolve o bloco data da rodada."""
+
+    response = requests.post(
+        f"{PIPELINE_BASE_URL}/api/pipeline/run",
+        json={"stimulus": prompt, "stim_type": stim_type, "save": True},
+        timeout=600,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("ok"):
+        raise RuntimeError(payload.get("error") or "pipeline retornou ok=false")
+    return payload["data"]
+
+
+def read_shared_pipeline_runs(limit: int = 10) -> list[dict[str, Any]]:
+    """Le as rodadas recentes direto do SQLite compartilhado (somente-leitura).
+
+    Abre em modo ro para nunca travar o processo que escreve (8000). Como o banco
+    usa WAL, leitores concorrentes nao bloqueiam a escrita.
+    """
+
+    if not SHARED_DB_PATH.exists():
+        return []
+
+    conn = sqlite3.connect(f"file:{SHARED_DB_PATH}?mode=ro", uri=True, timeout=5.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout=5000")
+        rows = conn.execute(
+            "SELECT id, created_at, stim_type, stimulus, response, metrics_json, source "
+            "FROM nodes ORDER BY created_at DESC LIMIT ?",
+            (max(1, min(limit, 50)),),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+    runs: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            metrics = json.loads(row["metrics_json"])
+        except (json.JSONDecodeError, TypeError):
+            metrics = {}
+        runs.append(
+            {
+                "id": row["id"],
+                "created_at": row["created_at"],
+                "stim_type": row["stim_type"],
+                "stimulus": row["stimulus"],
+                "response": row["response"],
+                "metrics": metrics,
+                "source": row["source"],
+            }
+        )
+    return runs
 
 
 def public_conversation_state() -> dict[str, Any]:
@@ -267,6 +338,14 @@ class LuziaHandler(BaseHTTPRequestHandler):
             memory_type = query.get("type", [None])[0]
             self.send_json({"memories": list_memories(memory_type)})
             return
+        if parsed.path == "/api/pipeline/runs":
+            query = parse_qs(parsed.query)
+            try:
+                limit = int(query.get("limit", ["10"])[0] or 10)
+            except ValueError:
+                limit = 10
+            self.send_json({"runs": read_shared_pipeline_runs(limit)})
+            return
         if parsed.path.startswith("/static/"):
             relative = parsed.path.removeprefix("/static/")
             self.send_file(STATIC_DIR / relative)
@@ -290,6 +369,38 @@ class LuziaHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "prompt vazio"}, status=HTTPStatus.BAD_REQUEST)
                 return
             self.stream_chat(prompt)
+            return
+        if parsed.path == "/api/pipeline/chat/stream":
+            payload = self.read_json()
+            prompt = str(payload.get("prompt", "")).strip()
+            stim_type = str(payload.get("stim_type", "sistemico")).strip() or "sistemico"
+            if not prompt:
+                self.send_json({"error": "prompt vazio"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self.stream_pipeline_chat(prompt, stim_type)
+            return
+        if parsed.path == "/api/pipeline/chat":
+            payload = self.read_json()
+            prompt = str(payload.get("prompt", "")).strip()
+            stim_type = str(payload.get("stim_type", "sistemico")).strip() or "sistemico"
+            if not prompt:
+                self.send_json({"error": "prompt vazio"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                data = run_pipeline_via_backend(prompt, stim_type)
+            except requests.RequestException as exc:
+                self.send_json(
+                    {"ok": False, "error": f"Pipeline Real (8000) indisponivel: {exc}"},
+                    status=HTTPStatus.BAD_GATEWAY,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.send_json(
+                    {"ok": False, "error": f"Falha no pipeline: {exc}"},
+                    status=HTTPStatus.BAD_GATEWAY,
+                )
+                return
+            self.send_json({"ok": True, "data": data})
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
@@ -339,6 +450,67 @@ class LuziaHandler(BaseHTTPRequestHandler):
 
         response = "".join(response_parts).strip()
         self.send_stream_event("done", finalize_chat_generation(prompt, prepared, response))
+
+    def stream_pipeline_chat(self, prompt: str, stim_type: str) -> None:
+        """Faz proxy do streaming SSE do Pipeline Real (8000) para o navegador.
+
+        Repassa os bytes do SSE do 8000 tal como chegam, preservando o
+        enquadramento de eventos (token... e done com as metricas no final).
+        """
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+        # O Pipeline Real exige estimulo com pelo menos 3 caracteres. Avisamos de
+        # forma amigavel em vez de deixar o 8000 devolver um 422 criptico.
+        if len(prompt) < 3:
+            self.send_stream_event(
+                "error",
+                {"message": "O modo Pipeline Real precisa de um estimulo com pelo menos 3 caracteres."},
+            )
+            return
+
+        try:
+            with requests.post(
+                f"{PIPELINE_BASE_URL}/api/pipeline/run/stream",
+                json={"stimulus": prompt, "stim_type": stim_type, "save": True},
+                stream=True,
+                timeout=600,
+            ) as upstream:
+                if upstream.status_code >= 400:
+                    self.send_stream_event(
+                        "error", {"message": self._extract_upstream_error(upstream)}
+                    )
+                    return
+                for chunk in upstream.iter_content(chunk_size=None):
+                    if not chunk:
+                        continue
+                    try:
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
+        except requests.RequestException as exc:
+            self.send_stream_event(
+                "error", {"message": f"Pipeline Real (8000) fora do ar: {exc}"}
+            )
+
+    @staticmethod
+    def _extract_upstream_error(upstream: "requests.Response") -> str:
+        """Traduz um erro HTTP do 8000 numa mensagem legivel para o chat."""
+
+        try:
+            detail = upstream.json().get("detail")
+            if isinstance(detail, list) and detail:
+                msgs = "; ".join(str(item.get("msg", item)) for item in detail)
+                return f"O Pipeline Real rejeitou a entrada: {msgs}."
+            if detail:
+                return f"O Pipeline Real recusou: {detail}."
+        except (ValueError, AttributeError):
+            pass
+        return f"O Pipeline Real respondeu HTTP {upstream.status_code}."
 
     def send_stream_event(self, event: str, data: dict[str, Any]) -> bool:
         """Escreve um evento SSE. Retorna False se o cliente desconectar."""

@@ -14,7 +14,17 @@
             <h1>Luzia</h1>
             <p>Presença simbólico-operacional TRQ META</p>
           </div>
-          <button id="helpButton" class="icon-button" title="Comandos">?</button>
+          <div class="topbar-actions">
+            <select id="stimType" class="stim-select" title="Tipo de estímulo (modo Pipeline Real)" hidden>
+              <option value="sistemico">sistêmico</option>
+              <option value="teorico">teórico</option>
+              <option value="empirico">empírico</option>
+              <option value="criativo">criativo</option>
+              <option value="reflexivo">reflexivo</option>
+            </select>
+            <button id="modeToggle" class="mode-toggle" type="button" data-mode="chat" title="Alternar entre Chat e Pipeline Real">Modo: Chat</button>
+            <button id="helpButton" class="icon-button" title="Comandos">?</button>
+          </div>
         </header>
 
         <div id="messages" class="messages" aria-live="polite"></div>
@@ -107,6 +117,12 @@
         <section class="panel-section">
           <h2>Corpo Digital</h2>
           <dl id="bodyGrid" class="metric-grid"></dl>
+        </section>
+
+        <section class="panel-section">
+          <h2>Pipeline Real <span class="pipe-badge">8000</span></h2>
+          <dl id="pipelineGrid" class="metric-grid"></dl>
+          <div id="pipelineRuns" class="memory-list"></div>
         </section>
 
         <section class="panel-section memory-tools">
