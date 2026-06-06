@@ -84,12 +84,286 @@ function roleLabel(role) {
   return "Sistema";
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, "&#96;");
+}
+
+function sanitizeHref(rawHref) {
+  const href = String(rawHref ?? "").trim();
+  if (!href) return "";
+  if (href.startsWith("#")) return href;
+  if (href.startsWith("/") && !href.startsWith("//")) return href;
+
+  try {
+    const url = new URL(href, window.location.origin);
+    if (["http:", "https:", "mailto:"].includes(url.protocol)) return url.href;
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function renderInlineMarkdown(value) {
+  const placeholders = [];
+  const stash = (html) => {
+    const token = `@@md${placeholders.length}@@`;
+    placeholders.push({ token, html });
+    return token;
+  };
+
+  let text = String(value ?? "");
+  text = text.replace(/`([^`\n]+)`/g, (_, code) => stash(`<code>${escapeHtml(code)}</code>`));
+  text = text.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (match, label, href) => {
+    const safeHref = sanitizeHref(href);
+    if (!safeHref) return match;
+    return stash(
+      `<a href="${escapeAttribute(safeHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`,
+    );
+  });
+
+  text = escapeHtml(text);
+  text = text
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_\n]+)__/g, "<strong>$1</strong>")
+    .replace(/~~([^~\n]+)~~/g, "<del>$1</del>")
+    .replace(/(^|[\s([{])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    .replace(/(^|[\s([{])_([^_\n]+)_/g, "$1<em>$2</em>");
+
+  placeholders.forEach(({ token, html }) => {
+    text = text.replaceAll(token, html);
+  });
+  return text;
+}
+
+function getListMarker(line) {
+  const match = /^(\s*)([-*+]|\d+[.)])\s+(.+)$/.exec(line);
+  if (!match) return null;
+  return {
+    indent: match[1].replace(/\t/g, "    ").length,
+    ordered: /^\d/.test(match[2]),
+    content: match[3],
+  };
+}
+
+function splitTableRow(line) {
+  let text = line.trim();
+  if (text.startsWith("|")) text = text.slice(1);
+  if (text.endsWith("|")) text = text.slice(0, -1);
+  return text.split("|").map((cell) => cell.trim());
+}
+
+function isTableSeparator(line) {
+  const cells = splitTableRow(line);
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function tableAlignment(separatorCell) {
+  if (/^:-{3,}:$/.test(separatorCell)) return "center";
+  if (/^-{3,}:$/.test(separatorCell)) return "right";
+  if (/^:-{3,}$/.test(separatorCell)) return "left";
+  return "";
+}
+
+function renderTable(lines, startIndex) {
+  const headers = splitTableRow(lines[startIndex]);
+  const separators = splitTableRow(lines[startIndex + 1]);
+  const alignments = separators.map(tableAlignment);
+  let index = startIndex + 2;
+  const rows = [];
+
+  while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
+    if (!isTableSeparator(lines[index])) rows.push(splitTableRow(lines[index]));
+    index += 1;
+  }
+
+  const alignAttr = (cellIndex) => {
+    const align = alignments[cellIndex];
+    return align ? ` style="text-align: ${align}"` : "";
+  };
+
+  const head = headers
+    .map((cell, cellIndex) => `<th${alignAttr(cellIndex)}>${renderInlineMarkdown(cell)}</th>`)
+    .join("");
+  const body = rows
+    .map((row) => {
+      const cells = headers
+        .map((_, cellIndex) => {
+          const value = row[cellIndex] ?? "";
+          return `<td${alignAttr(cellIndex)}>${renderInlineMarkdown(value)}</td>`;
+        })
+        .join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+
+  return {
+    html: `<div class="message-table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`,
+    nextIndex: index,
+  };
+}
+
+function renderListAt(lines, startIndex, indent, ordered) {
+  const tag = ordered ? "ol" : "ul";
+  let index = startIndex;
+  let html = `<${tag}>`;
+
+  while (index < lines.length) {
+    const marker = getListMarker(lines[index]);
+    if (!marker || marker.indent !== indent || marker.ordered !== ordered) break;
+
+    html += `<li>${renderInlineMarkdown(marker.content)}`;
+    index += 1;
+
+    while (index < lines.length) {
+      if (!lines[index].trim()) {
+        index += 1;
+        break;
+      }
+
+      const nextMarker = getListMarker(lines[index]);
+      if (nextMarker) {
+        if (nextMarker.indent > indent) {
+          const nested = renderListAt(lines, index, nextMarker.indent, nextMarker.ordered);
+          html += nested.html;
+          index = nested.nextIndex;
+          continue;
+        }
+        break;
+      }
+
+      html += `<br>${renderInlineMarkdown(lines[index].trim())}`;
+      index += 1;
+    }
+
+    html += "</li>";
+  }
+
+  html += `</${tag}>`;
+  return { html, nextIndex: index };
+}
+
+function isBlockBoundary(lines, index) {
+  const line = lines[index] || "";
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  if (/^```/.test(trimmed)) return true;
+  if (/^#{1,6}\s+/.test(trimmed)) return true;
+  if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) return true;
+  if (/^>\s?/.test(line)) return true;
+  if (getListMarker(line)) return true;
+  return lines[index + 1] && line.includes("|") && isTableSeparator(lines[index + 1]);
+}
+
+function renderMarkdown(value) {
+  const source = String(value ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = source.split("\n");
+  const blocks = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    if (/^```/.test(trimmed)) {
+      const language = trimmed.replace(/^```/, "").trim().replace(/[^\w-]/g, "");
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !/^```/.test(lines[index].trim())) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      const languageClass = language ? ` class="language-${escapeAttribute(language)}"` : "";
+      blocks.push(`<pre><code${languageClass}>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+      continue;
+    }
+
+    if (lines[index + 1] && line.includes("|") && isTableSeparator(lines[index + 1])) {
+      const table = renderTable(lines, index);
+      blocks.push(table.html);
+      index = table.nextIndex;
+      continue;
+    }
+
+    const heading = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+    if (heading) {
+      const level = heading[1].length;
+      blocks.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      blocks.push("<hr>");
+      index += 1;
+      continue;
+    }
+
+    if (/^>\s?/.test(line)) {
+      const quoteLines = [];
+      while (index < lines.length && /^>\s?/.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^>\s?/, ""));
+        index += 1;
+      }
+      blocks.push(`<blockquote>${renderMarkdown(quoteLines.join("\n"))}</blockquote>`);
+      continue;
+    }
+
+    const listMarker = getListMarker(line);
+    if (listMarker) {
+      const list = renderListAt(lines, index, listMarker.indent, listMarker.ordered);
+      blocks.push(list.html);
+      index = list.nextIndex;
+      continue;
+    }
+
+    const paragraphLines = [];
+    while (index < lines.length && !isBlockBoundary(lines, index)) {
+      paragraphLines.push(lines[index]);
+      index += 1;
+    }
+    if (!paragraphLines.length) {
+      paragraphLines.push(lines[index]);
+      index += 1;
+    }
+    blocks.push(`<p>${renderInlineMarkdown(paragraphLines.join("\n")).replace(/\n/g, "<br>")}</p>`);
+  }
+
+  return blocks.join("");
+}
+
+function renderMessageText(message) {
+  message.body.innerHTML = renderMarkdown(message.rawText);
+}
+
+function setMessageText(message, text) {
+  if (!message) return;
+  message.rawText = String(text ?? "");
+  renderMessageText(message);
+  messages.scrollTop = messages.scrollHeight;
+}
+
 function addMessage(role, text, className = "") {
   const now = new Date();
   const node = document.createElement("div");
   const meta = document.createElement("div");
   const body = document.createElement("div");
   const time = document.createElement("time");
+  const message = { node, body, rawText: String(text ?? "") };
 
   node.className = `message ${role} ${className}`.trim();
   meta.className = "message-meta";
@@ -98,17 +372,16 @@ function addMessage(role, text, className = "") {
   time.textContent = messageTimeFormatter.format(now);
 
   meta.append(roleLabel(role), time);
-  body.textContent = text;
+  renderMessageText(message);
   node.append(meta, body);
   messages.appendChild(node);
   messages.scrollTop = messages.scrollHeight;
-  return { node, body };
+  return message;
 }
 
 function appendMessageText(message, text) {
   if (!message || !text) return;
-  message.body.textContent += text;
-  messages.scrollTop = messages.scrollHeight;
+  setMessageText(message, `${message.rawText || ""}${text}`);
 }
 
 function setGrid(target, data, keys) {
@@ -397,8 +670,8 @@ async function sendPrompt(prompt) {
           assistantMessage = addMessage("assistant", data.response || data.message || "");
         } else {
           assistantMessage.node.classList.remove("streaming", "frozen");
-          if (data.response && assistantMessage.body.textContent !== data.response) {
-            assistantMessage.body.textContent = data.response;
+          if (data.response && assistantMessage.rawText !== data.response) {
+            setMessageText(assistantMessage, data.response);
           }
         }
         return;
@@ -583,8 +856,8 @@ async function sendPromptPipeline(prompt) {
           assistant = addMessage("assistant", data.response || "(sem resposta do pipeline)", "pipeline");
         }
         assistant.node.classList.remove("streaming");
-        if (data.response && assistant.body.textContent !== data.response) {
-          assistant.body.textContent = data.response;
+        if (data.response && assistant.rawText !== data.response) {
+          setMessageText(assistant, data.response);
         }
         renderPipelineMetricsCard(assistant, data);
         applyPipelineToInspector(data);
