@@ -132,7 +132,7 @@ children.push(table([3120, 6240], [
   ["Hardware sugerido", "GPU com VRAM suficiente ou RAM ampla; o offload CUDA/CPU é decidido pelo Ollama"],
 ]));
 children.push(H2("2.2 Dependências Python"));
-children.push(bulletRuns([R("Chat da Luzia (7860): ", { bold: true }), R("biblioteca leve "), R("requests", { mono: true }), R(" (ver requirements.txt). Backend em biblioteca padrão, sem framework web pesado.")]));
+children.push(bulletRuns([R("Chat da Luzia (7860): ", { bold: true }), R("biblioteca padrão do Python, sem dependência HTTP externa. Backend em biblioteca padrão, sem framework web pesado.")]));
 children.push(bulletRuns([R("Pipeline Real (8000): ", { bold: true }), R("fastapi", { mono: true }), R(", "), R("uvicorn[standard]", { mono: true }), R(", "), R("httpx", { mono: true }), R(", "), R("pydantic", { mono: true }), R(" (ver luzia_trq_backend_real/requirements.txt).")]));
 children.push(runsP([R("Nota de contingência: ", { bold: true }), R("sem o nomic-embed-text, o pipeline ainda funciona, mas cai num embedding determinístico por hash; nesse modo o "), R("stimulus_similarity_score", { mono: true }), R(" deixa de medir significado real. Para verdade semântica plena, o modelo de embeddings é necessário.")]));
 

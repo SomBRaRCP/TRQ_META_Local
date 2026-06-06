@@ -9,10 +9,12 @@ estimadores e roteamento sem depender de rede, GPU ou servidor Ollama ativo.
 import logging
 import math
 import json
+import time
+import socket
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
 from typing import Any
-
-import requests
 
 from config import (
     DEFAULT_GPU_BOOST_PERCENT,
@@ -46,6 +48,23 @@ logger = logging.getLogger(__name__)
 
 class OllamaStreamError(RuntimeError):
     """Erro tratavel durante geracao em streaming."""
+
+
+def _timeout_message() -> str:
+    return (
+        "Erro: a chamada ao Ollama excedeu o tempo limite total de "
+        f"{OLLAMA_TIMEOUT_SECONDS} segundos."
+    )
+
+
+def _ollama_request(payload: dict[str, Any]) -> urllib.request.Request:
+    body = json.dumps(payload).encode("utf-8")
+    return urllib.request.Request(
+        OLLAMA_ENDPOINT,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
 
 
 def _boosted_num_gpu(raw_num_gpu: str) -> int:
@@ -114,16 +133,20 @@ def generate_with_ollama(
 
     try:
         # Timeout padrao: 600 segundos, pois modelos grandes podem demorar.
-        response = requests.post(OLLAMA_ENDPOINT, json=payload, timeout=OLLAMA_TIMEOUT_SECONDS)
-
-        # Transforma HTTP 4xx/5xx em excecao tratavel abaixo.
-        response.raise_for_status()
-
-        # Ollama retorna JSON com a chave "response" quando stream=false.
-        data = response.json()
+        with urllib.request.urlopen(
+            _ollama_request(payload),
+            timeout=OLLAMA_TIMEOUT_SECONDS,
+        ) as response:
+            # Ollama retorna JSON com a chave "response" quando stream=false.
+            data = json.loads(response.read().decode("utf-8"))
         return str(data.get("response", "")).strip()
 
-    except requests.exceptions.ConnectionError:
+    except urllib.error.HTTPError as exc:
+        message = f"Erro HTTP {exc.code} ao chamar o Ollama: {exc.reason}"
+        logger.exception(message)
+        return message
+
+    except urllib.error.URLError:
         # Servidor desligado, porta errada ou endpoint inacessivel.
         message = (
             "Erro: nao consegui conectar ao Ollama em "
@@ -132,14 +155,14 @@ def generate_with_ollama(
         logger.exception(message)
         return message
 
-    except requests.exceptions.Timeout:
+    except (TimeoutError, socket.timeout):
         # A requisicao passou do limite configurado.
         message = "Erro: a chamada ao Ollama excedeu o tempo limite."
         logger.exception(message)
         return message
 
-    except requests.exceptions.RequestException as exc:
-        # Erros HTTP, DNS, conexao abortada e outros problemas do requests.
+    except OSError as exc:
+        # Erros HTTP, DNS, conexao abortada e outros problemas de rede.
         message = f"Erro ao chamar o Ollama: {exc}"
         logger.exception(message)
         return message
@@ -174,22 +197,26 @@ def stream_with_ollama(
     if system_prompt:
         payload["system"] = system_prompt
 
+    started = time.monotonic()
+
     try:
-        with requests.post(
-            OLLAMA_ENDPOINT,
-            json=payload,
-            stream=True,
+        with urllib.request.urlopen(
+            _ollama_request(payload),
             timeout=OLLAMA_TIMEOUT_SECONDS,
         ) as response:
-            response.raise_for_status()
+            for raw_line in response:
+                if time.monotonic() - started >= OLLAMA_TIMEOUT_SECONDS:
+                    message = _timeout_message()
+                    logger.error(message)
+                    raise OllamaStreamError(message)
 
-            for raw_line in response.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
+                line = raw_line.decode("utf-8").strip()
                 try:
-                    data = json.loads(raw_line)
+                    data = json.loads(line)
                 except ValueError:
-                    logger.warning("Linha invalida no streaming do Ollama: %r", raw_line)
+                    logger.warning("Linha invalida no streaming do Ollama: %r", line)
                     continue
 
                 chunk = data.get("response")
@@ -198,7 +225,12 @@ def stream_with_ollama(
                 if data.get("done"):
                     break
 
-    except requests.exceptions.ConnectionError as exc:
+    except urllib.error.HTTPError as exc:
+        message = f"Erro HTTP {exc.code} ao chamar o Ollama: {exc.reason}"
+        logger.exception(message)
+        raise OllamaStreamError(message) from exc
+
+    except urllib.error.URLError as exc:
         message = (
             "Erro: nao consegui conectar ao Ollama em "
             f"{OLLAMA_ENDPOINT}. Verifique se `ollama serve` esta rodando."
@@ -206,12 +238,12 @@ def stream_with_ollama(
         logger.exception(message)
         raise OllamaStreamError(message) from exc
 
-    except requests.exceptions.Timeout as exc:
+    except (TimeoutError, socket.timeout) as exc:
         message = "Erro: a chamada ao Ollama excedeu o tempo limite."
         logger.exception(message)
         raise OllamaStreamError(message) from exc
 
-    except requests.exceptions.RequestException as exc:
+    except OSError as exc:
         message = f"Erro ao chamar o Ollama: {exc}"
         logger.exception(message)
         raise OllamaStreamError(message) from exc

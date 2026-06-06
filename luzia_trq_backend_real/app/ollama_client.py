@@ -14,6 +14,14 @@ class OllamaUnavailable(RuntimeError):
     pass
 
 
+class OllamaGenerationTimeout(OllamaUnavailable):
+    pass
+
+
+def _timeout_message(timeout_s: float) -> str:
+    return f"Tempo limite total de geracao excedido ({timeout_s:g} segundos)."
+
+
 class OllamaClient:
     def __init__(self, base_url: str | None = None, timeout_s: float | None = None) -> None:
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
@@ -65,10 +73,12 @@ class OllamaClient:
                     "raw": data,
                 }
         except Exception as exc:  # noqa: BLE001
+            elapsed = max(time.perf_counter() - started, 1e-6)
+            if isinstance(exc, httpx.TimeoutException) or elapsed >= self.timeout_s:
+                raise OllamaUnavailable(_timeout_message(self.timeout_s)) from exc
             if not settings.allow_fallback:
                 raise OllamaUnavailable(str(exc)) from exc
             text = self._fallback_response(prompt)
-            elapsed = max(time.perf_counter() - started, 1e-6)
             tokens = len(text.split())
             return {
                 "text": text,
@@ -114,6 +124,8 @@ class OllamaClient:
                 ) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
+                        if time.perf_counter() - started >= self.timeout_s:
+                            raise OllamaGenerationTimeout(_timeout_message(self.timeout_s))
                         if not line.strip():
                             continue
                         data = json.loads(line)
@@ -138,14 +150,18 @@ class OllamaClient:
             return
         except Exception as exc:  # noqa: BLE001
             partial = "".join(parts).strip()
+            elapsed = max(time.perf_counter() - started, 1e-6)
+            timeout_error = (
+                isinstance(exc, (httpx.TimeoutException, OllamaGenerationTimeout))
+                or elapsed >= self.timeout_s
+            )
             if partial:
                 # Ja emitiu tokens reais; finaliza com o que veio do Ollama.
-                elapsed = max(time.perf_counter() - started, 1e-6)
                 tokens = len(partial.split())
                 yield {
                     "type": "final",
                     "text": partial,
-                    "source": "ollama_partial",
+                    "source": "ollama_timeout_partial" if timeout_error else "ollama_partial",
                     "model": payload["model"],
                     "elapsed_s": round(elapsed, 4),
                     "tokens": tokens,
@@ -153,6 +169,8 @@ class OllamaClient:
                     "error": str(exc),
                 }
                 return
+            if timeout_error:
+                raise OllamaUnavailable(_timeout_message(self.timeout_s)) from exc
             if not settings.allow_fallback:
                 raise OllamaUnavailable(str(exc)) from exc
 

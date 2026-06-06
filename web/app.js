@@ -268,6 +268,12 @@ function applyResult(data) {
       "relational_score",
       "cognitive_reflection_score",
       "C_llm",
+      "r_uni",
+      "r_fused",
+      "xi_iemf",
+      "fusion_regime",
+      "fusion_tier",
+      "fusion_confidence",
     ]);
   }
 
@@ -586,9 +592,21 @@ async function sendPromptPipeline(prompt) {
         return;
       }
 
+      if (event === "frozen") {
+        finished = true;
+        clearPending();
+        if (assistant) {
+          assistant.node.classList.remove("streaming");
+          assistant.node.classList.add("frozen");
+        }
+        addMessage("system", data.message || "Pipeline interrompido pelo tempo limite.");
+        return;
+      }
+
       if (event === "error") {
         finished = true;
         clearPending();
+        if (assistant) assistant.node.classList.remove("streaming");
         addMessage("system", data.message || data.error || "Erro no streaming do pipeline.");
       }
     });

@@ -19,6 +19,13 @@ logs/*.log
 reports/*.csv
 reports/*.tmp
 web_check_*.png
+# Imagens soltas na raiz nao devem entrar no repositorio.
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.gif
+/*.bmp
 .tmp_*.log
 .DS_Store
 Thumbs.db

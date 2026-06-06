@@ -267,7 +267,7 @@ Chat da Luzia (7860):
 - Python 3.11+
 - Ollama instalado e ativo
 - Modelo de geracao local `gpt-oss:20b`
-- Dependencia Python leve: `requests`
+- O Chat da Luzia usa apenas biblioteca padrao do Python
 
 Pipeline Real (8000) — opcional, necessario apenas para o modo hibrido:
 
@@ -482,10 +482,59 @@ GET  /api/pipeline/runs    rodadas recentes
 GET  /docs                 documentacao interativa (Swagger)
 ```
 
+## TRQ-IEMF Router
+
+O projeto inclui o **TRQ-IEMF Router**, uma adaptacao inferencial inspirada no principio de inverse effectiveness. Ele nao reproduz o IEMF original de treinamento: nao modula gradientes, nao treina redes, nao chama Ollama e nao carrega outro modelo. Ele apenas decide, como camada auxiliar, quanta fusao cognitiva vale a pena antes de montar contexto.
+
+Principio operacional:
+
+- fonte individual forte -> menos fusao, menor custo;
+- fontes fracas/parciais -> mais memoria/contexto/RAG futuro;
+- sinais colapsados -> clarificar ou responder com baixa confianca.
+
+Arquivos:
+
+```text
+trq_iemf_router.py      # modulo puro, sem dependencias externas
+meta_router.py          # estima sinais de prompt, memoria, RAG e contexto recente
+model_registry.py       # cliente leve compartilhado por nome de modelo
+test_trq_iemf_router.py # testes simples sem pytest
+```
+
+O TRQ-IEMF adiciona observaveis auxiliares ao estado:
+
+```text
+r_uni
+r_fused
+xi_iemf
+fusion_regime
+fusion_tier
+fusion_confidence
+```
+
+Ele nao altera a formula principal atual do nucleo TRQ/C_llm:
+
+```text
+C_llm = alpha * I - beta * S_norm + delta * F_flow_norm + epsilon * M
+```
+
+Exemplo de log:
+
+```text
+=== TRQ-IEMF Router ===
+r_uni: 0.5831
+r_fused: 0.6924
+xi_iemf: 0.7798
+regime: FUSION_DOMINANT
+tier: deep
+confianca: moderada-alta
+```
+
 ## Como Testar
 
 ```bash
 python test_battery.py
+python test_trq_iemf_router.py
 ```
 
 Teste da camada de memória:

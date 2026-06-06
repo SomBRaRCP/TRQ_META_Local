@@ -24,7 +24,8 @@ from memory_store import (
     append_conversation_summary,
 )
 from memory import get_recent_records, record_turn_memory, search_memory_records
-from ollama_client import generate_with_ollama
+from meta_router import apply_trq_iemf_aux, run_trq_iemf_router
+from model_registry import ModelRegistry
 from presence_prompt import (
     build_creator_context,
     build_memory_context_prompt,
@@ -63,6 +64,16 @@ def print_state(state: TRQState, conversation_state: ConversationState) -> None:
     print(f"relational_score: {state['relational_score']}")
     print(f"cognitive_reflection_score: {state['cognitive_reflection_score']}")
     print(f"C_llm: {state['C_llm']}")
+
+    xi_iemf = state.get("xi_iemf")
+    if xi_iemf is not None:
+        print("\n=== TRQ-IEMF Router ===")
+        print(f"r_uni: {state.get('r_uni', 0.0)}")
+        print(f"r_fused: {state.get('r_fused', 0.0)}")
+        print(f"xi_iemf: {xi_iemf}")
+        print(f"regime: {state.get('fusion_regime', 'TRANSITION')}")
+        print(f"tier: {state.get('fusion_tier', 'balanced')}")
+        print(f"confianca: {state.get('fusion_confidence', 'moderada')}")
 
     # Memoria curta usada para detectar insistencia ontologica na conversa.
     print(f"existential_count: {conversation_state['existential_count']}")
@@ -244,14 +255,29 @@ def run_once(prompt: str, conversation_state: ConversationState) -> None:
     # Nos turnos seguintes, a Luzia deve responder com presenca sem repetir.
     ontological_warning_allowed = should_use_ontological_warning(prompt, conversation_state)
 
-    # 3. Exibe metricas e corpo antes da chamada ao modelo, para o usuario nao
+    # 3. Recupera candidatos de memoria e calcula o roteador auxiliar IEMF.
+    memory_candidates = build_memory_context(prompt, limit=8)
+    iemf_decision, trq_aux = run_trq_iemf_router(
+        prompt=prompt,
+        memory_hits=memory_candidates,
+        rag_hits=None,
+        recent_messages=conversation_state["last_prompts"],
+    )
+    apply_trq_iemf_aux(state, trq_aux)
+
+    # 3.1. O TRQ-IEMF controla apenas quanto contexto auxiliar entra.
+    relevant_memories = (
+        memory_candidates[: iemf_decision.max_context_items]
+        if iemf_decision.use_memory
+        else []
+    )
+    memory_prompt = build_memory_context_prompt(relevant_memories)
+
+    # 3.2. Exibe metricas e corpo antes da chamada ao modelo, para o usuario nao
     # precisar esperar o Ollama terminar para ver o roteamento.
     print_state(state, conversation_state)
+    print(f"motivo: {iemf_decision.reason}")
     print_digital_body_state(body_state)
-
-    # 3.1. Recupera memorias relevantes para orientar continuidade.
-    relevant_memories = build_memory_context(prompt)
-    memory_prompt = build_memory_context_prompt(relevant_memories)
 
     # 4. Converte o tier e o corpo digital em instrucao de sistema.
     system_prompt = "\n\n".join(
@@ -276,9 +302,9 @@ def run_once(prompt: str, conversation_state: ConversationState) -> None:
     record_ontological_warning(conversation_state, ontological_warning_allowed)
 
     # 5. Chama o modelo local com o prompt original e o system prompt escolhido.
-    response = generate_with_ollama(
+    model_client = ModelRegistry.get(DEFAULT_MODEL)
+    response = model_client.generate(
         prompt=prompt,
-        model=DEFAULT_MODEL,
         system_prompt=system_prompt,
     )
 

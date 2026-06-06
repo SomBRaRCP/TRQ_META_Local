@@ -1,1 +1,1 @@
-requests
+# O Chat da Luzia usa apenas a biblioteca padrão do Python.

@@ -410,13 +410,13 @@ button:active {
 .luzia-avatar-motion {
   position: absolute;
   left: 50%;
-  top: 47%;
+  top: 53%;
   z-index: 5;
-  width: min(440px, 76%);
-  aspect-ratio: 308 / 476;
-  max-height: min(720px, 82vh);
+  width: min(400px, 72%);
+  aspect-ratio: 308 / 640;
+  max-height: min(700px, 78vh);
   transform: translate(-50%, -50%);
-  transform-origin: 50% 64%;
+  transform-origin: 50% 58%;
   pointer-events: none;
   animation: none;
   will-change: transform;
@@ -960,16 +960,16 @@ button:active {
     transform: translate(-50%, -50%) translate3d(0, 0, 0) rotate(0deg) scale(1);
   }
   18% {
-    transform: translate(-50%, -50%) translate3d(-3px, -13px, 0) rotate(-0.55deg) scale(1.008);
+    transform: translate(-50%, -50%) translate3d(-3px, -6px, 0) rotate(-0.45deg) scale(1.004);
   }
   38% {
-    transform: translate(-50%, -50%) translate3d(4px, -7px, 0) rotate(0.42deg) scale(1.014);
+    transform: translate(-50%, -50%) translate3d(4px, -3px, 0) rotate(0.34deg) scale(1.006);
   }
   62% {
-    transform: translate(-50%, -50%) translate3d(2px, -19px, 0) rotate(0.28deg) scale(1.01);
+    transform: translate(-50%, -50%) translate3d(2px, -8px, 0) rotate(0.22deg) scale(1.005);
   }
   82% {
-    transform: translate(-50%, -50%) translate3d(-4px, -8px, 0) rotate(-0.38deg) scale(1.006);
+    transform: translate(-50%, -50%) translate3d(-4px, -4px, 0) rotate(-0.3deg) scale(1.003);
   }
 }
 
@@ -1224,9 +1224,9 @@ button:active {
   }
 
   .luzia-avatar-motion {
-    width: min(370px, 88%);
-    max-height: min(560px, 72vh);
-    top: 46%;
+    width: min(320px, 82%);
+    max-height: min(540px, 70vh);
+    top: 54%;
   }
 
   .luzia-base {

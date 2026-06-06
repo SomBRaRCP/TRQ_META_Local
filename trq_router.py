@@ -8,7 +8,7 @@ mantem a camada operacional EXISTENCIAL_REFLEXIVO para perguntas ontologicas
 ou insistencia curta em IA, consciencia, existencia e TRQ META.
 """
 
-from typing import TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from affective_sensor import estimate_affective_score
 from cognitive_sensor import estimate_cognitive_reflection_score
@@ -73,6 +73,16 @@ class TRQState(TypedDict):
     # regime e tier sao as saidas operacionais do roteador.
     regime: str
     tier: str
+
+    # Observaveis auxiliares do TRQ-IEMF Router. Eles nao substituem regime,
+    # tier ou C_llm do nucleo TRQ.
+    r_uni: NotRequired[float]
+    r_fused: NotRequired[float]
+    xi_iemf: NotRequired[float]
+    fusion_regime: NotRequired[str]
+    fusion_tier: NotRequired[str]
+    fusion_confidence: NotRequired[str]
+    aux: NotRequired[dict[str, Any]]
 
 
 class ConversationState(TypedDict):

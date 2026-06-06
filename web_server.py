@@ -10,15 +10,17 @@ import json
 import mimetypes
 import os
 import sqlite3
+import time
+import socket
+import urllib.error
+import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-import requests
-
-from config import BASE_DIR, DEFAULT_MODEL, ensure_runtime_dirs
+from config import BASE_DIR, DEFAULT_MODEL, OLLAMA_TIMEOUT_SECONDS, ensure_runtime_dirs
 from creator_profile import get_creator_profile
 from digital_body import build_digital_body_state
 from luzia_persona import build_luzia_persona_prompt
@@ -36,7 +38,9 @@ from memory_store import (
     append_conversation_summary,
 )
 from memory import record_turn_memory
-from ollama_client import OllamaStreamError, generate_with_ollama, stream_with_ollama
+from meta_router import apply_trq_iemf_aux, run_trq_iemf_router
+from model_registry import ModelRegistry
+from ollama_client import OllamaStreamError
 from presence_prompt import (
     build_creator_context,
     build_memory_context_prompt,
@@ -58,25 +62,71 @@ conversation_state = create_conversation_state()
 # Endereco do backend de Pipeline Real (FastAPI, porta 8000) que o chat aciona
 # no modo hibrido. Sobrescrevivel por variavel de ambiente.
 PIPELINE_BASE_URL = os.getenv("TRQ_PIPELINE_URL", "http://127.0.0.1:8000")
+PIPELINE_TIMEOUT_SECONDS = int(os.getenv("TRQ_PIPELINE_TIMEOUT_SECONDS", str(OLLAMA_TIMEOUT_SECONDS)))
 
 # Banco SQLite compartilhado: o pipeline (8000) grava as rodadas aqui e o chat
 # (7860) le as mesmas rodadas em modo somente-leitura. E a "memoria compartilhada".
 SHARED_DB_PATH = BASE_DIR / "luzia_trq_backend_real" / "data" / "luzia_trq.sqlite3"
 
 
+class PipelineRequestError(RuntimeError):
+    """Erro tratavel ao chamar o Pipeline Real."""
+
+
+def pipeline_request(
+    path: str,
+    payload: dict[str, Any],
+    *,
+    timeout: int = PIPELINE_TIMEOUT_SECONDS,
+) -> urllib.request.Request:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return urllib.request.Request(
+        f"{PIPELINE_BASE_URL}{path}",
+        data=body,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+
+
 def run_pipeline_via_backend(prompt: str, stim_type: str = "sistemico") -> dict[str, Any]:
     """Aciona o Pipeline Real (8000) por proxy e devolve o bloco data da rodada."""
 
-    response = requests.post(
-        f"{PIPELINE_BASE_URL}/api/pipeline/run",
-        json={"stimulus": prompt, "stim_type": stim_type, "save": True},
-        timeout=600,
+    request = pipeline_request(
+        "/api/pipeline/run",
+        {"stimulus": prompt, "stim_type": stim_type, "save": True},
     )
-    response.raise_for_status()
-    payload = response.json()
+    try:
+        with urllib.request.urlopen(request, timeout=PIPELINE_TIMEOUT_SECONDS) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise PipelineRequestError(_extract_upstream_error(exc.code, exc.read())) from exc
+    except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
+        raise PipelineRequestError(f"Pipeline Real (8000) indisponivel: {exc}") from exc
     if not payload.get("ok"):
         raise RuntimeError(payload.get("error") or "pipeline retornou ok=false")
     return payload["data"]
+
+
+def _extract_upstream_error(status_code: int, body: bytes | str | None = None) -> str:
+    """Traduz um erro HTTP do 8000 numa mensagem legivel para o chat."""
+
+    text = ""
+    if isinstance(body, bytes):
+        text = body.decode("utf-8", errors="replace")
+    elif isinstance(body, str):
+        text = body
+
+    try:
+        detail = json.loads(text).get("detail")
+        if isinstance(detail, list) and detail:
+            msgs = "; ".join(str(item.get("msg", item)) for item in detail)
+            return f"O Pipeline Real rejeitou a entrada: {msgs}."
+        if detail:
+            return f"O Pipeline Real recusou: {detail}."
+    except (ValueError, AttributeError, TypeError):
+        pass
+
+    return f"O Pipeline Real respondeu HTTP {status_code}."
 
 
 def read_shared_pipeline_runs(limit: int = 10) -> list[dict[str, Any]]:
@@ -238,7 +288,19 @@ def prepare_chat_generation(prompt: str) -> dict[str, Any]:
         trq_count=int(conversation_state["trq_count"]),
     )
     ontological_warning_allowed = should_use_ontological_warning(prompt, conversation_state)
-    relevant_memories = build_memory_context(prompt)
+    memory_candidates = build_memory_context(prompt, limit=8)
+    iemf_decision, trq_aux = run_trq_iemf_router(
+        prompt=prompt,
+        memory_hits=memory_candidates,
+        rag_hits=None,
+        recent_messages=conversation_state["last_prompts"],
+    )
+    apply_trq_iemf_aux(state, trq_aux)
+    relevant_memories = (
+        memory_candidates[: iemf_decision.max_context_items]
+        if iemf_decision.use_memory
+        else []
+    )
     memory_prompt = build_memory_context_prompt(relevant_memories)
 
     system_prompt = "\n\n".join(
@@ -267,6 +329,7 @@ def prepare_chat_generation(prompt: str) -> dict[str, Any]:
         "body_state": body_state,
         "system_prompt": system_prompt,
         "relevant_memories": relevant_memories,
+        "iemf_decision": iemf_decision,
     }
 
 
@@ -315,9 +378,9 @@ def process_chat(prompt: str) -> dict[str, Any]:
         return command
 
     prepared = prepare_chat_generation(prompt)
-    response = generate_with_ollama(
+    model_client = ModelRegistry.get(DEFAULT_MODEL)
+    response = model_client.generate(
         prompt=prompt,
-        model=DEFAULT_MODEL,
         system_prompt=prepared["system_prompt"],
     )
     return finalize_chat_generation(prompt, prepared, response)
@@ -388,9 +451,9 @@ class LuziaHandler(BaseHTTPRequestHandler):
                 return
             try:
                 data = run_pipeline_via_backend(prompt, stim_type)
-            except requests.RequestException as exc:
+            except PipelineRequestError as exc:
                 self.send_json(
-                    {"ok": False, "error": f"Pipeline Real (8000) indisponivel: {exc}"},
+                    {"ok": False, "error": str(exc)},
                     status=HTTPStatus.BAD_GATEWAY,
                 )
                 return
@@ -429,10 +492,10 @@ class LuziaHandler(BaseHTTPRequestHandler):
         )
 
         response_parts: list[str] = []
+        model_client = ModelRegistry.get(DEFAULT_MODEL)
         try:
-            for chunk in stream_with_ollama(
+            for chunk in model_client.stream(
                 prompt=prompt,
-                model=DEFAULT_MODEL,
                 system_prompt=str(prepared["system_prompt"]),
             ):
                 response_parts.append(chunk)
@@ -473,44 +536,48 @@ class LuziaHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            with requests.post(
-                f"{PIPELINE_BASE_URL}/api/pipeline/run/stream",
-                json={"stimulus": prompt, "stim_type": stim_type, "save": True},
-                stream=True,
-                timeout=600,
-            ) as upstream:
-                if upstream.status_code >= 400:
-                    self.send_stream_event(
-                        "error", {"message": self._extract_upstream_error(upstream)}
-                    )
-                    return
-                for chunk in upstream.iter_content(chunk_size=None):
+            started = time.monotonic()
+            request = pipeline_request(
+                "/api/pipeline/run/stream",
+                {"stimulus": prompt, "stim_type": stim_type, "save": True},
+            )
+            with urllib.request.urlopen(request, timeout=PIPELINE_TIMEOUT_SECONDS) as upstream:
+                while True:
+                    if time.monotonic() - started >= PIPELINE_TIMEOUT_SECONDS:
+                        self.send_stream_event(
+                            "frozen",
+                            {
+                                "message": (
+                                    "Pipeline Real interrompido pelo tempo limite total "
+                                    f"de {PIPELINE_TIMEOUT_SECONDS} segundos."
+                                ),
+                                "frozen": True,
+                            },
+                        )
+                        return
+                    chunk = upstream.readline()
                     if not chunk:
-                        continue
+                        break
                     try:
                         self.wfile.write(chunk)
                         self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError):
                         return
-        except requests.RequestException as exc:
+        except urllib.error.HTTPError as exc:
+            self.send_stream_event(
+                "error", {"message": _extract_upstream_error(exc.code, exc.read())}
+            )
+        except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
             self.send_stream_event(
                 "error", {"message": f"Pipeline Real (8000) fora do ar: {exc}"}
             )
 
     @staticmethod
-    def _extract_upstream_error(upstream: "requests.Response") -> str:
+    def _extract_upstream_error(upstream: object) -> str:
         """Traduz um erro HTTP do 8000 numa mensagem legivel para o chat."""
 
-        try:
-            detail = upstream.json().get("detail")
-            if isinstance(detail, list) and detail:
-                msgs = "; ".join(str(item.get("msg", item)) for item in detail)
-                return f"O Pipeline Real rejeitou a entrada: {msgs}."
-            if detail:
-                return f"O Pipeline Real recusou: {detail}."
-        except (ValueError, AttributeError):
-            pass
-        return f"O Pipeline Real respondeu HTTP {upstream.status_code}."
+        status_code = int(getattr(upstream, "status_code", 502))
+        return _extract_upstream_error(status_code)
 
     def send_stream_event(self, event: str, data: dict[str, Any]) -> bool:
         """Escreve um evento SSE. Retorna False se o cliente desconectar."""
